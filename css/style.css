@@ -18,6 +18,7 @@ body {
     background: var(--bg); 
     color: var(--text);
     line-height: 1.5;
+    overflow-x: hidden;
 }
 
 .header {
@@ -89,8 +90,11 @@ body {
     cursor: pointer;
     transition: all 0.2s;
     font-size: 0.875rem;
+    background: #e2e8f0;
+    color: var(--text);
 }
 
+.btn:hover { background: #cbd5e1; }
 .btn-primary { background: var(--primary); color: white; }
 .btn-primary:hover { background: var(--primary-dark); }
 .btn-success { background: var(--success); color: white; }
@@ -105,13 +109,18 @@ body {
 .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
 .preview-container {
-    background: #1e293b;
+    background: #0f172a;
     border-radius: 8px;
-    height: 420px;
+    height: 400px;
     position: relative;
+    overflow: hidden;
 }
 
-#preview { background: #0f172a; width: 100%; height: 100%; }
+#preview { 
+    display: block;
+    width: 100%;
+    height: 100%;
+}
 
 .parts-table {
     width: 100%;
@@ -176,17 +185,6 @@ body {
 
 .tab-content { display: none; }
 .tab-content.active { display: block; }
-
-.badge { 
-    display: inline-block; 
-    padding: 0.2rem 0.5rem; 
-    font-size: 0.6875rem; 
-    font-weight: 600;
-    border-radius: 9999px;
-}
-
-.badge-door { background: #dbeafe; color: #1d4ed8; }
-.badge-drawer { background: #dcfce7; color: #16a34a; }
 
 .search-box { margin-bottom: 0.75rem; }
 .search-box input {
