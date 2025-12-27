@@ -821,6 +821,7 @@ function exportAllDXF() {
 }
 
 function exportDXF(list) {
+    // Use the vector DXF export with proper layer names and vector text
     const job = document.getElementById('job-number').value || 'job';
     const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
     
@@ -828,84 +829,145 @@ function exportDXF(list) {
         const hingeSide = part.hingeSide || 'left';
         const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
         
-        // Layer names matching Aspire toolpath template names
-        // "35mm" and "8mm" to match "01h Drill 35mm" and "01d Drill 8mm" templates
-        const layers = ['Outline', '35mm', '8mm', 'Labels'];
+        // Layer names to match Aspire toolpath templates
+        // "Drill 35mm" matches "01h Drill 35mm.ToolpathTemplate"
+        // "Drill 8mm" matches "01d Drill 8mm.ToolpathTemplate"
+        const layers = [
+            { name: 'Drill 35mm', color: 1 },   // Red - cup boring
+            { name: 'Drill 8mm', color: 3 },    // Green - pilot holes
+            { name: 'Profile', color: 7 },      // White - outline cut
+            { name: 'Pencil', color: 5 }        // Blue - label engraving
+        ];
         
-        // DXF Header with units (inches)
+        // DXF Header
         let dxf = '0\nSECTION\n2\nHEADER\n';
-        dxf += '9\n$INSUNITS\n70\n1\n';  // 1 = inches
-        dxf += '9\n$MEASUREMENT\n70\n0\n';  // 0 = imperial
+        dxf += '9\n$ACADVER\n1\nAC1015\n';
+        dxf += '9\n$INSUNITS\n70\n1\n';
         dxf += '0\nENDSEC\n';
         
-        // Tables section with layers
-        dxf += '0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
-        const colors = { 'Outline': 7, '35mm': 1, '8mm': 3, 'Labels': 5 };  // white, red, green, blue
-        layers.forEach(n => {
-            dxf += '0\nLAYER\n2\n' + n + '\n70\n0\n62\n' + (colors[n] || 7) + '\n6\nCONTINUOUS\n';
+        // Tables - Layers
+        dxf += '0\nSECTION\n2\nTABLES\n';
+        dxf += '0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
+        layers.forEach(l => {
+            dxf += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + l.color + '\n6\nCONTINUOUS\n';
         });
         dxf += '0\nENDTAB\n0\nENDSEC\n';
         
-        // Entities section
+        // Entities
         dxf += '0\nSECTION\n2\nENTITIES\n';
         
-        // Outline as closed LWPOLYLINE
-        dxf += '0\nLWPOLYLINE\n8\nOutline\n90\n4\n70\n1\n';
+        // Profile outline (closed polyline)
+        dxf += '0\nLWPOLYLINE\n8\nProfile\n90\n4\n70\n1\n';
         dxf += '10\n0\n20\n0\n';
         dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
         dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
         dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
         
-        // Holes as CIRCLES - layer name matches drill size
-        holes.forEach(h => {
-            const layer = h.isCup ? '35mm' : '8mm';
-            const radiusInches = h.dia / 2;  // Already in inches
-            dxf += '0\nCIRCLE\n8\n' + layer + '\n';
-            dxf += '10\n' + h.x.toFixed(4) + '\n';  // Center X
-            dxf += '20\n' + h.y.toFixed(4) + '\n';  // Center Y
-            dxf += '30\n0\n';  // Center Z
-            dxf += '40\n' + radiusInches.toFixed(4) + '\n';  // Radius (not diameter!)
+        // Cup holes (35mm) on Drill 35mm layer
+        holes.filter(h => h.isCup).forEach(h => {
+            dxf += '0\nCIRCLE\n8\nDrill 35mm\n';
+            dxf += '10\n' + h.x.toFixed(4) + '\n20\n' + h.y.toFixed(4) + '\n30\n0\n';
+            dxf += '40\n' + (h.dia / 2).toFixed(4) + '\n';
         });
         
-        // Part name label - MTEXT for better compatibility
-        dxf += '0\nMTEXT\n8\nLabels\n';
-        dxf += '10\n' + (part.width / 2).toFixed(4) + '\n';
-        dxf += '20\n' + (part.height / 2).toFixed(4) + '\n';
-        dxf += '30\n0\n';
-        dxf += '40\n0.5\n';  // Text height
-        dxf += '71\n1\n';  // Attachment point (top-left)
-        dxf += '72\n5\n';  // Drawing direction
-        dxf += '1\n' + part.name + '\n';
+        // Pilot holes (8mm) on Drill 8mm layer
+        holes.filter(h => !h.isCup).forEach(h => {
+            dxf += '0\nCIRCLE\n8\nDrill 8mm\n';
+            dxf += '10\n' + h.x.toFixed(4) + '\n20\n' + h.y.toFixed(4) + '\n30\n0\n';
+            dxf += '40\n' + (h.dia / 2).toFixed(4) + '\n';
+        });
+        
+        // Vector text labels on Pencil layer
+        const cx = part.width / 2;
+        const cy = part.height / 2;
+        
+        // Part name as vector strokes
+        dxf += vectorText(part.name, cx, cy + 0.3, 0.5, 'Pencil');
         
         // Hinge side indicator
-        const sideText = hingeSide === 'left' ? 'HINGE: LEFT' : 
-                        hingeSide === 'right' ? 'HINGE: RIGHT' : 
-                        hingeSide === 'both' ? 'HINGE: BOTH' :
-                        hingeSide === 'top' ? 'HINGE: TOP' : 'HINGE: BOTTOM';
-        dxf += '0\nMTEXT\n8\nLabels\n';
-        dxf += '10\n' + (part.width / 2).toFixed(4) + '\n';
-        dxf += '20\n' + (part.height / 2 - 0.75).toFixed(4) + '\n';
-        dxf += '30\n0\n';
-        dxf += '40\n0.25\n';
-        dxf += '1\n' + sideText + '\n';
+        const sideCode = hingeSide === 'left' ? 'L' : hingeSide === 'right' ? 'R' : 
+                        hingeSide === 'both' ? 'LR' : hingeSide === 'top' ? 'T' : 'B';
+        dxf += vectorText(sideCode, cx, cy - 0.3, 0.4, 'Pencil');
         
-        // Dimensions as MTEXT
-        dxf += '0\nMTEXT\n8\nLabels\n';
-        dxf += '10\n' + (part.width / 2).toFixed(4) + '\n';
-        dxf += '20\n' + (part.height / 2 - 1.25).toFixed(4) + '\n';
-        dxf += '30\n0\n';
-        dxf += '40\n0.2\n';
-        dxf += '1\n' + (part.width * 25.4).toFixed(1) + ' x ' + (part.height * 25.4).toFixed(1) + ' mm\n';
+        // Dimensions
+        const dimText = Math.round(part.width * 25.4) + 'x' + Math.round(part.height * 25.4);
+        dxf += vectorText(dimText, cx, cy - 0.9, 0.25, 'Pencil');
         
         dxf += '0\nENDSEC\n0\nEOF\n';
         
-        // Filename with hinge side
-        const sideCode = hingeSide === 'left' ? 'L' : hingeSide === 'right' ? 'R' : 
-                        hingeSide === 'both' ? 'LR' : hingeSide.charAt(0).toUpperCase();
+        // Download
         const fn = job + '_' + part.name + '_' + sideCode + '.dxf';
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
         a.download = fn.replace(/\s+/g, '_');
         a.click();
     });
+}
+
+// Stroke font for vector text (simplified block letters)
+const STROKE_FONT = {
+    'A': [[[0,0],[0.5,1],[1,0]], [[0.2,0.4],[0.8,0.4]]],
+    'B': [[[0,0],[0,1],[0.7,1],[1,0.8],[0.7,0.5],[0,0.5]], [[0.7,0.5],[1,0.2],[0.7,0],[0,0]]],
+    'C': [[[1,0.2],[0.8,0],[0.2,0],[0,0.2],[0,0.8],[0.2,1],[0.8,1],[1,0.8]]],
+    'D': [[[0,0],[0,1],[0.7,1],[1,0.7],[1,0.3],[0.7,0],[0,0]]],
+    'E': [[[1,0],[0,0],[0,0.5],[0.7,0.5]], [[0,0.5],[0,1],[1,1]]],
+    'F': [[[0,0],[0,1],[1,1]], [[0,0.5],[0.7,0.5]]],
+    'G': [[[1,0.8],[0.8,1],[0.2,1],[0,0.8],[0,0.2],[0.2,0],[0.8,0],[1,0.2],[1,0.5],[0.5,0.5]]],
+    'H': [[[0,0],[0,1]], [[1,0],[1,1]], [[0,0.5],[1,0.5]]],
+    'I': [[[0.3,0],[0.7,0]], [[0.5,0],[0.5,1]], [[0.3,1],[0.7,1]]],
+    'J': [[[0,0.2],[0.2,0],[0.6,0],[0.8,0.2],[0.8,1]]],
+    'K': [[[0,0],[0,1]], [[1,1],[0,0.5],[1,0]]],
+    'L': [[[0,1],[0,0],[1,0]]],
+    'M': [[[0,0],[0,1],[0.5,0.5],[1,1],[1,0]]],
+    'N': [[[0,0],[0,1],[1,0],[1,1]]],
+    'O': [[[0.2,0],[0,0.2],[0,0.8],[0.2,1],[0.8,1],[1,0.8],[1,0.2],[0.8,0],[0.2,0]]],
+    'P': [[[0,0],[0,1],[0.7,1],[1,0.8],[1,0.6],[0.7,0.5],[0,0.5]]],
+    'R': [[[0,0],[0,1],[0.7,1],[1,0.8],[1,0.6],[0.7,0.5],[0,0.5]], [[0.5,0.5],[1,0]]],
+    'S': [[[1,0.8],[0.8,1],[0.2,1],[0,0.8],[0.2,0.5],[0.8,0.5],[1,0.2],[0.8,0],[0.2,0],[0,0.2]]],
+    'T': [[[0,1],[1,1]], [[0.5,1],[0.5,0]]],
+    'U': [[[0,1],[0,0.2],[0.2,0],[0.8,0],[1,0.2],[1,1]]],
+    'V': [[[0,1],[0.5,0],[1,1]]],
+    'W': [[[0,1],[0.25,0],[0.5,0.5],[0.75,0],[1,1]]],
+    'X': [[[0,0],[1,1]], [[0,1],[1,0]]],
+    'Y': [[[0,1],[0.5,0.5],[1,1]], [[0.5,0.5],[0.5,0]]],
+    'Z': [[[0,1],[1,1],[0,0],[1,0]]],
+    '0': [[[0.2,0],[0,0.2],[0,0.8],[0.2,1],[0.8,1],[1,0.8],[1,0.2],[0.8,0],[0.2,0]]],
+    '1': [[[0.3,0.8],[0.5,1],[0.5,0]], [[0.2,0],[0.8,0]]],
+    '2': [[[0,0.8],[0.2,1],[0.8,1],[1,0.8],[1,0.6],[0,0],[1,0]]],
+    '3': [[[0,0.8],[0.2,1],[0.8,1],[1,0.8],[0.8,0.5],[0.5,0.5]], [[0.8,0.5],[1,0.2],[0.8,0],[0.2,0],[0,0.2]]],
+    '4': [[[0.7,0],[0.7,1],[0,0.3],[1,0.3]]],
+    '5': [[[1,1],[0,1],[0,0.5],[0.8,0.5],[1,0.3],[0.8,0],[0,0]]],
+    '6': [[[1,0.8],[0.8,1],[0.2,1],[0,0.8],[0,0.2],[0.2,0],[0.8,0],[1,0.2],[1,0.4],[0.8,0.5],[0,0.5]]],
+    '7': [[[0,1],[1,1],[0.3,0]]],
+    '8': [[[0.5,0.5],[0.2,0.5],[0,0.7],[0.2,1],[0.8,1],[1,0.7],[0.8,0.5],[0.2,0.5],[0,0.3],[0.2,0],[0.8,0],[1,0.3],[0.8,0.5]]],
+    '9': [[[0,0.2],[0.2,0],[0.8,0],[1,0.2],[1,0.8],[0.8,1],[0.2,1],[0,0.8],[0,0.6],[0.2,0.5],[1,0.5]]],
+    'x': [[[0,0],[1,0.6]], [[0,0.6],[1,0]]],
+    '-': [[[0.2,0.5],[0.8,0.5]]],
+    ' ': []
+};
+
+// Generate vector text as DXF polylines (centered)
+function vectorText(text, centerX, centerY, height, layer) {
+    const charWidth = height * 0.7;
+    const spacing = height * 0.2;
+    const totalWidth = text.length * charWidth + (text.length - 1) * spacing;
+    let startX = centerX - totalWidth / 2;
+    let dxf = '';
+    
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i].toUpperCase();
+        const strokes = STROKE_FONT[char] || STROKE_FONT[text[i]] || [];
+        
+        strokes.forEach(stroke => {
+            if (stroke.length < 2) return;
+            dxf += '0\nLWPOLYLINE\n8\n' + layer + '\n90\n' + stroke.length + '\n70\n0\n';
+            stroke.forEach(pt => {
+                const px = startX + pt[0] * charWidth;
+                const py = centerY + pt[1] * height - height/2;
+                dxf += '10\n' + px.toFixed(4) + '\n20\n' + py.toFixed(4) + '\n';
+            });
+        });
+        startX += charWidth + spacing;
+    }
+    return dxf;
 }
