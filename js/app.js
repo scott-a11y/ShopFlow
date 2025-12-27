@@ -94,40 +94,58 @@ function doMeasure(x, y) {
     const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
     const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
     
-    // Snap detection
-    const snapResult = findSnapPoint(px, py, part, holes);
-    px = snapResult.x;
-    py = snapResult.y;
+    // Snap detection with SMALL distances
+    let snapX = px, snapY = py, snapLabel = 'Point';
+    let foundHole = false;
+    
+    // 1. Check holes first - 0.5" snap radius (about 12mm)
+    const holeSnap = 0.5;
+    let closestDist = holeSnap;
+    
+    for (const h of holes) {
+        const d = Math.sqrt((px - h.x) ** 2 + (py - h.y) ** 2);
+        if (d < closestDist) {
+            closestDist = d;
+            snapX = h.x;
+            snapY = h.y;
+            snapLabel = h.isCup ? 'Cup' : 'Pilot';
+            foundHole = true;
+        }
+    }
+    
+    // 2. If no hole, check edges - 0.4" snap
+    if (!foundHole) {
+        const edgeSnap = 0.4;
+        if (px < edgeSnap && py >= 0 && py <= part.height) {
+            snapX = 0; snapLabel = 'Left Edge';
+        } else if (px > part.width - edgeSnap && py >= 0 && py <= part.height) {
+            snapX = part.width; snapLabel = 'Right Edge';
+        } else if (py < edgeSnap && px >= 0 && px <= part.width) {
+            snapY = 0; snapLabel = 'Bottom Edge';
+        } else if (py > part.height - edgeSnap && px >= 0 && px <= part.width) {
+            snapY = part.height; snapLabel = 'Top Edge';
+        }
+    }
     
     if (!measureStart) {
-        measureStart = { 
-            x: px, y: py, 
-            type: snapResult.type,
-            label: snapResult.label
-        };
-        document.getElementById('btn-measure').textContent = '📏 End Pt';
-        document.getElementById('measure-result').innerHTML = 
-            '<span style="color:#22d3ee">⊙ ' + snapResult.label + '</span> → Click second point...';
+        measureStart = { x: snapX, y: snapY, label: snapLabel };
+        document.getElementById('btn-measure').textContent = '📏 Pt 2';
+        document.getElementById('measure-result').innerHTML = '<b>' + snapLabel + '</b> → Click 2nd point';
     } else {
-        const dx = px - measureStart.x;
-        const dy = py - measureStart.y;
+        const dx = snapX - measureStart.x;
+        const dy = snapY - measureStart.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        
-        measureStart.endX = px;
-        measureStart.endY = py;
-        measureStart.endType = snapResult.type;
-        measureStart.endLabel = snapResult.label;
+        measureStart.endX = snapX;
+        measureStart.endY = snapY;
+        measureStart.endLabel = snapLabel;
         measureStart.dist = dist;
         
         document.getElementById('measure-result').innerHTML = 
-            '<span style="color:#22d3ee">⊙ ' + measureStart.label + '</span> → ' +
-            '<span style="color:#a855f7">⊙ ' + snapResult.label + '</span><br>' +
-            '<b style="font-size:14px">Distance: ' + formatDim(dist) + ' (' + (dist*25.4).toFixed(2) + 'mm)</b> | ' +
-            'ΔX: ' + formatDim(Math.abs(dx)) + ' | ΔY: ' + formatDim(Math.abs(dy));
+            '<b>' + measureStart.label + '</b> → <b>' + snapLabel + '</b>: ' +
+            '<span style="color:#22d3ee;font-size:16px;font-weight:bold">' + (dist * 25.4).toFixed(2) + ' mm</span> (' + formatDim(dist) + ')';
         
         drawPreview();
         
-        // Reset after 8 seconds
         setTimeout(() => {
             measureStart = null;
             measureMode = false;
@@ -136,93 +154,10 @@ function doMeasure(x, y) {
             canvas.style.cursor = 'grab';
             document.getElementById('measure-result').textContent = 'Drag to pan • Scroll to zoom';
             drawPreview();
-        }, 8000);
+        }, 6000);
         return;
     }
     drawPreview();
-}
-
-function findSnapPoint(px, py, part, holes) {
-    const snapRadius = 2.0; // inches
-    let best = { x: px, y: py, dist: Infinity, type: 'free', label: formatDim(px) + ', ' + formatDim(py) };
-    
-    // Priority 1: Hole centers (cups get higher priority than pilots)
-    holes.filter(h => h.isCup).forEach(h => {
-        const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
-        if (dist < best.dist && dist < snapRadius) {
-            best = { x: h.x, y: h.y, dist: dist, type: 'cup', 
-                label: 'Cup @ ' + formatDim(h.x) + ', ' + formatDim(h.y) };
-        }
-    });
-    
-    // Priority 2: Pilot holes
-    if (best.type === 'free') {
-        holes.filter(h => !h.isCup).forEach(h => {
-            const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
-            if (dist < best.dist && dist < snapRadius) {
-                best = { x: h.x, y: h.y, dist: dist, type: 'pilot',
-                    label: 'Pilot @ ' + formatDim(h.x) + ', ' + formatDim(h.y) };
-            }
-        });
-    }
-    
-    // Priority 3: Corners
-    if (best.type === 'free') {
-        const corners = [
-            { x: 0, y: 0, label: 'Corner (BL)' },
-            { x: part.width, y: 0, label: 'Corner (BR)' },
-            { x: 0, y: part.height, label: 'Corner (TL)' },
-            { x: part.width, y: part.height, label: 'Corner (TR)' }
-        ];
-        corners.forEach(c => {
-            const dist = Math.sqrt(Math.pow(px - c.x, 2) + Math.pow(py - c.y, 2));
-            if (dist < best.dist && dist < snapRadius) {
-                best = { x: c.x, y: c.y, dist: dist, type: 'corner', label: c.label };
-            }
-        });
-    }
-    
-    // Priority 4: Edges
-    if (best.type === 'free') {
-        // Left edge
-        if (px < snapRadius && py >= 0 && py <= part.height) {
-            const dist = Math.abs(px);
-            if (dist < best.dist) {
-                const edgeY = Math.max(0, Math.min(part.height, py));
-                best = { x: 0, y: edgeY, dist: dist, type: 'edge',
-                    label: 'Left Edge @ Y=' + formatDim(edgeY) };
-            }
-        }
-        // Right edge
-        if (part.width - px < snapRadius && py >= 0 && py <= part.height) {
-            const dist = Math.abs(part.width - px);
-            if (dist < best.dist) {
-                const edgeY = Math.max(0, Math.min(part.height, py));
-                best = { x: part.width, y: edgeY, dist: dist, type: 'edge',
-                    label: 'Right Edge @ Y=' + formatDim(edgeY) };
-            }
-        }
-        // Bottom edge
-        if (py < snapRadius && px >= 0 && px <= part.width) {
-            const dist = Math.abs(py);
-            if (dist < best.dist) {
-                const edgeX = Math.max(0, Math.min(part.width, px));
-                best = { x: edgeX, y: 0, dist: dist, type: 'edge',
-                    label: 'Bottom Edge @ X=' + formatDim(edgeX) };
-            }
-        }
-        // Top edge
-        if (part.height - py < snapRadius && px >= 0 && px <= part.width) {
-            const dist = Math.abs(part.height - py);
-            if (dist < best.dist) {
-                const edgeX = Math.max(0, Math.min(part.width, px));
-                best = { x: edgeX, y: part.height, dist: dist, type: 'edge',
-                    label: 'Top Edge @ X=' + formatDim(edgeX) };
-            }
-        }
-    }
-    
-    return best;
 }
 
 async function loadDatabase() {
@@ -641,90 +576,49 @@ function drawPreview() {
         const sx = ox + measureStart.x * scale;
         const sy = oy + (part.height - measureStart.y) * scale;
         
-        // Start point color based on type
-        const startColor = measureStart.type === 'cup' ? '#dc2626' : 
-                          measureStart.type === 'pilot' ? '#22c55e' : 
-                          measureStart.type === 'corner' ? '#f59e0b' : '#06b6d4';
-        
-        // Start point with glow
-        ctx.shadowColor = startColor;
-        ctx.shadowBlur = 10;
+        // Start point - cyan
         ctx.beginPath();
-        ctx.arc(sx, sy, 8, 0, Math.PI * 2);
-        ctx.fillStyle = startColor;
+        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#22d3ee';
         ctx.fill();
-        ctx.shadowBlur = 0;
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Start label
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('1', sx, sy + 3);
-        
-        // If we have end point, draw line and end point
+        // If we have end point
         if (measureStart.endX !== undefined) {
             const ex = ox + measureStart.endX * scale;
             const ey = oy + (part.height - measureStart.endY) * scale;
             
-            const endColor = measureStart.endType === 'cup' ? '#dc2626' : 
-                            measureStart.endType === 'pilot' ? '#22c55e' : 
-                            measureStart.endType === 'corner' ? '#f59e0b' : '#a855f7';
-            
-            // Measurement line
+            // Line
             ctx.beginPath();
             ctx.moveTo(sx, sy);
             ctx.lineTo(ex, ey);
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
-            ctx.setLineDash([8, 4]);
+            ctx.setLineDash([6, 4]);
             ctx.stroke();
             ctx.setLineDash([]);
             
-            // End point with glow
-            ctx.shadowColor = endColor;
-            ctx.shadowBlur = 10;
+            // End point - purple
             ctx.beginPath();
-            ctx.arc(ex, ey, 8, 0, Math.PI * 2);
-            ctx.fillStyle = endColor;
+            ctx.arc(ex, ey, 6, 0, Math.PI * 2);
+            ctx.fillStyle = '#a855f7';
             ctx.fill();
-            ctx.shadowBlur = 0;
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.stroke();
             
-            // End label
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 9px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('2', ex, ey + 3);
-            
-            // Distance label at midpoint
+            // Distance label
             const mx = (sx + ex) / 2;
             const my = (sy + ey) / 2;
-            const distText = (measureStart.dist * 25.4).toFixed(2) + ' mm';
-            const inchText = formatDim(measureStart.dist);
-            
-            // Background pill
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-            const pillW = 120, pillH = 40;
-            ctx.beginPath();
-            ctx.roundRect(mx - pillW/2, my - pillH/2, pillW, pillH, 6);
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            
-            // Distance text
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 14px sans-serif';
+            const label = (measureStart.dist * 25.4).toFixed(2) + ' mm';
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(mx - 35, my - 10, 70, 20);
+            ctx.fillStyle = '#22d3ee';
+            ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(distText, mx, my - 5);
-            ctx.font = '11px sans-serif';
-            ctx.fillStyle = '#94a3b8';
-            ctx.fillText(inchText, mx, my + 12);
+            ctx.fillText(label, mx, my + 4);
         }
     }
     
