@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cabinet Door/Drawer CNC Configurator v5</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>🪵 Cabinet Door/Drawer CNC Configurator v5</h1>
+            <div class="db-info" id="db-info">Loading database...</div>
+        </div>
+        <div>
+            <button class="btn btn-success" onclick="exportAllDXF()">📦 Export All DXF</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat">
+                <div class="stat-value" id="stat-parts">0</div>
+                <div class="stat-label">Total Parts</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="stat-doors">0</div>
+                <div class="stat-label">Doors</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="stat-drawers">0</div>
+                <div class="stat-label">Drawer Fronts</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="stat-holes">0</div>
+                <div class="stat-label">DB Hole Ops</div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <!-- Left Panel: Hardware & Settings -->
+            <div>
+                <div class="card">
+                    <div class="card-header">⚙️ Hardware Selection</div>
+                    <div class="card-body">
+                        <div class="tab-bar">
+                            <div class="tab active" data-tab="hinge">Hinges</div>
+                            <div class="tab" data-tab="slide">Slides</div>
+                        </div>
+                        
+                        <div id="tab-hinge" class="tab-content active">
+                            <div class="search-box">
+                                <input type="text" id="hinge-search" placeholder="Search hinges..." oninput="filterHardware('hinge')">
+                            </div>
+                            <div class="scroll-container" id="hinge-list" style="max-height:200px;"></div>
+                        </div>
+                        
+                        <div id="tab-slide" class="tab-content">
+                            <div class="search-box">
+                                <input type="text" id="slide-search" placeholder="Search slides..." oninput="filterHardware('slide')">
+                            </div>
+                            <div class="scroll-container" id="slide-list" style="max-height:200px;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card" style="margin-top:1rem;">
+                    <div class="card-header">📐 Hinge Placement</div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>Template</label>
+                            <select id="hinge-template" onchange="updateHingeTemplate()"></select>
+                        </div>
+                        <div style="font-size:0.875rem;">
+                            <div style="margin-bottom:0.5rem;"><strong>Bottom:</strong> <span id="bottom-hinge">3"</span></div>
+                            <div style="margin-bottom:0.5rem;"><strong>Top:</strong> <span id="top-hinge">[top]-3"</span></div>
+                            <div><strong>Max Span:</strong> <span id="max-span">9999"</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Center Panel: Preview & Parts -->
+            <div>
+                <div class="card">
+                    <div class="card-header">
+                        <span>👁️ Part Preview</span>
+                        <select id="preview-select" onchange="updatePreview()" style="width:180px;padding:0.375rem;border-radius:6px;border:1px solid #e2e8f0;"></select>
+                    </div>
+                    <div class="card-body">
+                        <div class="preview-container">
+                            <svg id="preview"></svg>
+                        </div>
+                        <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+                            <button class="btn btn-primary" onclick="exportSelectedDXF()">Export Selected</button>
+                            <button class="btn" onclick="zoomIn()">🔍+</button>
+                            <button class="btn" onclick="zoomOut()">🔍−</button>
+                            <button class="btn" onclick="resetZoom()">⟲</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card" style="margin-top:1rem;">
+                    <div class="card-header">
+                        <span>📋 Parts List</span>
+                        <button class="btn btn-primary btn-sm" onclick="addPart()">+ Add Part</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="scroll-container">
+                            <table class="parts-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:30px;"></th>
+                                        <th>Name</th>
+                                        <th style="width:70px;">Width</th>
+                                        <th style="width:70px;">Height</th>
+                                        <th style="width:80px;">Type</th>
+                                        <th style="width:40px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="parts-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Output Settings -->
+            <div>
+                <div class="card">
+                    <div class="card-header">📄 DXF Settings</div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>Material Thickness</label>
+                            <select id="material-thickness">
+                                <option value="0.75">3/4" (0.75")</option>
+                                <option value="0.5">1/2" (0.5")</option>
+                                <option value="0.625">5/8" (0.625")</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Layer Format</label>
+                            <select id="layer-format">
+                                <option value="cabinetsense">CabinetSense (Aspire)</option>
+                                <option value="simple">Simple Names</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Part Zero</label>
+                            <select id="part-zero">
+                                <option value="bottom-left">Bottom Left</option>
+                                <option value="center">Center</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card" style="margin-top:1rem;">
+                    <div class="card-header">🏷️ CabinetSense Layers</div>
+                    <div class="card-body">
+                        <div class="scroll-container" id="layers-info" style="font-size:0.8125rem;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="js/app.js"></script>
+</body>
+</html>
