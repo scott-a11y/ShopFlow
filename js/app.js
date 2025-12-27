@@ -313,6 +313,51 @@ function updatePreview() {
     // Holes - now with CORRECT positions from database
     const holes = part.type === 'door' ? getHingeHoles(part) : getDrawerHoles(part);
     
+    // Draw dimension lines from cup to pilots (manufacturer spec visualization)
+    if (showDimensions && part.type === 'door') {
+        const bottomHoles = holes.filter(h => h.y < part.height / 2);
+        const cup = bottomHoles.find(h => h.isCup);
+        const pilots = bottomHoles.filter(h => !h.isCup);
+        
+        if (cup && pilots.length) {
+            const cupX = ox + cup.x * scale;
+            const cupY = oy + (part.height - cup.y) * scale;
+            
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 1;
+            
+            pilots.forEach(pilot => {
+                const pilotX = ox + pilot.x * scale;
+                const pilotY = oy + (part.height - pilot.y) * scale;
+                
+                // Line from cup center to pilot
+                ctx.beginPath();
+                ctx.moveTo(cupX, cupY);
+                ctx.lineTo(pilotX, pilotY);
+                ctx.stroke();
+            });
+            
+            ctx.setLineDash([]);
+            
+            // X offset dimension line
+            if (pilots[0]) {
+                const pilotX = ox + pilots[0].x * scale;
+                ctx.strokeStyle = '#22d3ee';
+                ctx.beginPath();
+                ctx.moveTo(cupX, cupY + 30);
+                ctx.lineTo(pilotX, cupY + 30);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#22d3ee';
+                ctx.font = '9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.abs(pilots[0].xOffsetFromCup).toFixed(1) + 'mm', (cupX + pilotX) / 2, cupY + 42);
+            }
+        }
+    }
+    
+    // Draw holes
     holes.forEach(h => {
         const hx = ox + h.x * scale;
         const hy = oy + (part.height - h.y) * scale;
@@ -326,6 +371,7 @@ function updatePreview() {
         ctx.lineWidth = 1.5;
         ctx.stroke();
         
+        // Show diameter in hole
         if (showDimensions && r > 8) {
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 9px sans-serif';
@@ -348,21 +394,22 @@ function updatePreview() {
         ctx.fillText(formatFraction(part.height), 0, 0);
         ctx.restore();
         
-        // Hole callouts
+        // Manufacturer spec callouts
         if (part.type === 'door' && holes.length) {
-            const cup = holes.find(h => h.dia > 1);
-            const pilot = holes.find(h => h.dia < 1 && h.dia > 0.2);
+            const cup = holes.find(h => h.isCup);
+            const pilot = holes.find(h => !h.isCup && h.dia > 0.2);
             
             ctx.fillStyle = '#22d3ee';
             ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left';
             
             if (cup) {
-                // Cup X position
-                ctx.fillText('Cup: ' + (cup.x * 25.4).toFixed(1) + 'mm', ox + 60, oy + H + 20);
+                // Cup setback from edge
+                ctx.fillText('Cup from edge: ' + cup.cupSetback.toFixed(1) + 'mm', ox + 10, oy + H + 18);
             }
-            if (pilot) {
-                // Pilot X position  
-                ctx.fillText('Pilot: ' + (pilot.x * 25.4).toFixed(1) + 'mm', ox + 160, oy + H + 20);
+            if (pilot && cup) {
+                // Pilot offset FROM CUP CENTER (manufacturer spec)
+                ctx.fillText('Pilot from cup: X=' + pilot.xOffsetFromCup.toFixed(1) + 'mm, Y=±' + Math.abs(pilot.zOffsetFromCup).toFixed(1) + 'mm', ox + 10, oy + H + 32);
             }
         }
     }
@@ -405,7 +452,7 @@ function updatePreview() {
     }
 }
 
-// FIXED: Get hinge holes with correct X positions for each hole type
+// Get hinge holes with manufacturer specs relative to cup center
 function getHingeHoles(part) {
     const holes = [];
     const template = DB?.Hinging?.find(h => h.OID == document.getElementById('hinge-template')?.value);
@@ -423,16 +470,29 @@ function getHingeHoles(part) {
         topY = part.height - (parseMM(tv) || 3);
     }
     
-    // Add holes at both positions - EACH HOLE KEEPS ITS OWN X!
+    // Find cup hole to calculate relative positions
+    const cupHole = pattern.find(h => h.dia > 1);
+    const cupX = cupHole ? cupHole.x : pattern[0].x;
+    
+    // Add holes at both hinge positions
     [bottomY, topY].forEach(hingeY => {
         pattern.forEach(h => {
             const isCup = h.dia > 1;
+            // Calculate offset from cup center for display
+            const xOffsetFromCup = (h.x - cupX) * 25.4; // in mm
+            const zOffsetFromCup = h.z * 25.4; // in mm
+            
             holes.push({
-                x: h.x,                    // USE THE HOLE'S OWN X POSITION!
-                y: hingeY + h.z,           // Y = hinge position + Z offset
+                x: h.x,
+                y: hingeY + h.z,
                 dia: h.dia,
                 depth: h.depth,
-                color: isCup ? '#dc2626' : '#16a34a'
+                color: isCup ? '#dc2626' : '#16a34a',
+                isCup: isCup,
+                // Manufacturer spec: offset from cup center
+                xOffsetFromCup: xOffsetFromCup,
+                zOffsetFromCup: zOffsetFromCup,
+                cupSetback: cupX * 25.4 // Cup distance from edge in mm
             });
         });
     });
@@ -442,14 +502,25 @@ function getHingeHoles(part) {
 
 function getHingeHolesFallback(part) {
     const holes = [];
-    // Blum specs: Cup at 22.5mm, Pilots at 32mm, Z offset ±22.5mm
+    // Blum specs: Cup at 22.5mm, Pilots at 32mm (9.5mm from cup), Z offset ±22.5mm
     const cupX = 22.5/25.4, pilotX = 32/25.4, zOff = 22.5/25.4;
     const cupD = 35/25.4, pilotD = 8/25.4;
+    const xOffset = (pilotX - cupX) * 25.4; // 9.5mm
+    const zOffMM = zOff * 25.4; // 22.5mm
     
     [3, part.height - 3].forEach(y => {
-        holes.push({ x: cupX, y, dia: cupD, color: '#dc2626' });
-        holes.push({ x: pilotX, y: y - zOff, dia: pilotD, color: '#16a34a' });
-        holes.push({ x: pilotX, y: y + zOff, dia: pilotD, color: '#16a34a' });
+        holes.push({ 
+            x: cupX, y, dia: cupD, color: '#dc2626', 
+            isCup: true, xOffsetFromCup: 0, zOffsetFromCup: 0, cupSetback: 22.5 
+        });
+        holes.push({ 
+            x: pilotX, y: y - zOff, dia: pilotD, color: '#16a34a',
+            isCup: false, xOffsetFromCup: xOffset, zOffsetFromCup: -zOffMM, cupSetback: 22.5
+        });
+        holes.push({ 
+            x: pilotX, y: y + zOff, dia: pilotD, color: '#16a34a',
+            isCup: false, xOffsetFromCup: xOffset, zOffsetFromCup: zOffMM, cupSetback: 22.5
+        });
     });
     return holes;
 }
