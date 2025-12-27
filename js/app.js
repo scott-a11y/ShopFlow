@@ -1,10 +1,13 @@
 // ShopFlow - Cabinet Production Workflow v5
+// Uses CabinetSense database for manufacturer hole specs
+
 let DB = null;
 let parts = [];
 let zoomLevel = 1;
 let showDimensions = true;
 let measureMode = false;
 let measureStart = null;
+let selectedHingeOID = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -21,7 +24,7 @@ async function loadDatabase() {
         DB = data.tables;
         
         document.getElementById('db-info').textContent = 
-            `CabinetSense: ${DB.Hole?.length || 0} hole ops • ${DB.Part?.length || 0} parts • Exported: ${data.exported}`;
+            `CabinetSense: ${DB.Hole?.length || 0} hole ops • ${DB.Part?.length || 0} parts`;
         document.getElementById('stat-holes').textContent = DB.Hole?.length || 0;
         
         populateHardwareLists();
@@ -34,17 +37,74 @@ async function loadDatabase() {
     }
 }
 
-// Populate hardware selection lists
+// Parse measurement string (handles "22.5mm", "3\"", "32mm", formulas)
+function parseMeasurement(str) {
+    if (!str || str === '') return 0;
+    str = String(str).trim();
+    
+    // Remove formula parts like [hingeside_x_overlap] for now (treat as 0)
+    str = str.replace(/\+?\[.*?\]/g, '').trim();
+    
+    // Handle mm
+    if (str.includes('mm')) {
+        return parseFloat(str.replace('mm', '')) / 25.4; // Convert to inches
+    }
+    
+    // Handle inches with quotes
+    if (str.includes('"')) {
+        return parseFloat(str.replace('"', ''));
+    }
+    
+    // Plain number - assume mm if small, inches if larger
+    const num = parseFloat(str);
+    if (isNaN(num)) return 0;
+    return num > 50 ? num / 25.4 : num; // Assume mm if > 50
+}
+
+// Get hole pattern for a specific hinge from database
+function getHingeHolePattern(hingeOID) {
+    if (!DB || !DB.Hole) return null;
+    
+    const holes = DB.Hole.filter(h => h.OIDPart === String(hingeOID));
+    if (holes.length === 0) return null;
+    
+    return holes.map(h => ({
+        xLocation: parseMeasurement(h.XLocation),      // Setback from edge
+        yLocation: h.YLocation,                         // Usually empty (set by template)
+        zLocation: parseMeasurement(h.ZLocation),      // Offset from center (for pilots)
+        diameter: parseMeasurement(h.Diameter),
+        depth: parseMeasurement(h.Depth),
+        raw: h
+    }));
+}
+
+// Get hinge info from Part table
+function getHingeInfo(hingeOID) {
+    if (!DB || !DB.Part) return null;
+    return DB.Part.find(p => p.OID === String(hingeOID));
+}
+
+// Populate hardware selection lists  
 function populateHardwareLists() {
     const hingeList = document.getElementById('hinge-list');
     if (DB.Part) {
-        const hinges = DB.Part.filter(p => p.Class === '28' || p.Class === '15');
-        hingeList.innerHTML = hinges.map(h => `
-            <div class="hardware-item" data-oid="${h.OID}" onclick="selectHardware('hinge', ${h.OID})">
-                <div class="name">${h.Name}</div>
-                <div class="details">${h.Mfg || 'Generic'} • ${h.PartNumber || 'N/A'}</div>
-            </div>
-        `).join('');
+        // Class 28 = Door Hinge
+        const hinges = DB.Part.filter(p => p.Class === '28');
+        hingeList.innerHTML = hinges.map(h => {
+            const holePattern = getHingeHolePattern(h.OID);
+            const holeCount = holePattern ? holePattern.length : 0;
+            return `
+                <div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge(${h.OID})">
+                    <div class="name">${h.Name}</div>
+                    <div class="details">${holeCount} holes • OID: ${h.OID}</div>
+                </div>
+            `;
+        }).join('');
+        
+        // Select first hinge by default
+        if (hinges.length > 0) {
+            selectHinge(parseInt(hinges[0].OID));
+        }
     }
     
     const slideList = document.getElementById('slide-list');
@@ -58,13 +118,33 @@ function populateHardwareLists() {
     }
 }
 
+// Select a hinge and update preview
+function selectHinge(oid) {
+    selectedHingeOID = oid;
+    document.querySelectorAll('#hinge-list .hardware-item').forEach(el => {
+        el.classList.toggle('selected', el.dataset.oid == oid);
+    });
+    
+    // Show selected hinge info
+    const hinge = getHingeInfo(oid);
+    const pattern = getHingeHolePattern(oid);
+    
+    if (hinge && pattern) {
+        console.log(`Selected: ${hinge.Name}`, pattern);
+    }
+    
+    updatePreview();
+}
+
 // Populate hinge template dropdown
 function populateHingeTemplates() {
     const select = document.getElementById('hinge-template');
     if (DB.Hinging) {
-        select.innerHTML = DB.Hinging.map(h => 
-            `<option value="${h.OID}">${h.Template}${h.HingeName ? ' (' + h.HingeName + ')' : ''}</option>`
-        ).join('');
+        select.innerHTML = DB.Hinging.map(h => {
+            const hinge = getHingeInfo(h.HingeOID);
+            const hingeName = hinge ? hinge.Name : 'Unknown';
+            return `<option value="${h.OID}" data-hinge-oid="${h.HingeOID}">${h.Template} - ${hingeName}</option>`;
+        }).join('');
         updateHingeTemplate();
     }
 }
@@ -82,14 +162,21 @@ function populateLayers() {
     }
 }
 
-// Update hinge template display
+// Update hinge template display and select corresponding hinge
 function updateHingeTemplate() {
-    const templateId = document.getElementById('hinge-template').value;
+    const select = document.getElementById('hinge-template');
+    const templateId = select.value;
     const template = DB.Hinging?.find(h => h.OID == templateId);
+    
     if (template) {
         document.getElementById('bottom-hinge').textContent = template.BottomHinge;
         document.getElementById('top-hinge').textContent = template.TopHinge;
         document.getElementById('max-span').textContent = template.MaxSpan;
+        
+        // Also select the hinge associated with this template
+        if (template.HingeOID) {
+            selectHinge(parseInt(template.HingeOID));
+        }
     }
 }
 
@@ -104,7 +191,6 @@ function initUI() {
         };
     });
     
-    // Measure tool - click handling on SVG
     const svg = document.getElementById('preview');
     svg.addEventListener('click', handleMeasureClick);
 }
@@ -165,7 +251,6 @@ function renderParts() {
     updatePreview();
 }
 
-// Update a part property
 function updatePart(id, field, value) {
     const part = parts.find(p => p.id === id);
     if (part) {
@@ -174,33 +259,23 @@ function updatePart(id, field, value) {
     }
 }
 
-// Add new part
 function addPart() {
     const maxId = parts.length > 0 ? Math.max(...parts.map(p => p.id)) : 0;
-    parts.push({
-        id: maxId + 1,
-        name: `Part ${maxId + 1}`,
-        width: 18,
-        height: 24,
-        type: 'door'
-    });
+    parts.push({ id: maxId + 1, name: `Part ${maxId + 1}`, width: 18, height: 24, type: 'door' });
     renderParts();
 }
 
-// Remove part
 function removePart(id) {
     parts = parts.filter(p => p.id !== id);
     renderParts();
 }
 
-// Update statistics
 function updateStats() {
     document.getElementById('stat-parts').textContent = parts.length;
     document.getElementById('stat-doors').textContent = parts.filter(p => p.type === 'door').length;
     document.getElementById('stat-drawers').textContent = parts.filter(p => p.type === 'drawer').length;
 }
 
-// Populate preview dropdown
 function populatePreviewSelect() {
     const select = document.getElementById('preview-select');
     select.innerHTML = parts.map(p => 
@@ -208,10 +283,9 @@ function populatePreviewSelect() {
     ).join('');
 }
 
-// Store preview transform for measure tool
 let previewTransform = { scale: 1, offsetX: 0, offsetY: 0, partHeight: 0 };
 
-// Update preview SVG with dimensions
+// Update preview with holes from database
 function updatePreview() {
     const svg = document.getElementById('preview');
     const partId = parseInt(document.getElementById('preview-select').value);
@@ -235,103 +309,171 @@ function updatePreview() {
     const offsetX = (svgWidth - partW) / 2;
     const offsetY = (svgHeight - partH) / 2;
     
-    // Store for measure tool
     previewTransform = { scale, offsetX, offsetY, partHeight: part.height };
     
     let html = '';
     
-    // Grid background
+    // Grid
     html += `<defs>
         <pattern id="grid" width="${scale}" height="${scale}" patternUnits="userSpaceOnUse">
             <path d="M ${scale} 0 L 0 0 0 ${scale}" fill="none" stroke="#334155" stroke-width="0.5" opacity="0.3"/>
         </pattern>
     </defs>`;
     
-    // Part outline with grid
     html += `<rect x="${offsetX}" y="${offsetY}" width="${partW}" height="${partH}" fill="url(#grid)" stroke="#3b82f6" stroke-width="2"/>`;
     
-    // Get holes based on part type
-    const holes = part.type === 'door' ? getHingeHoles(part) : getDrawerHoles(part);
+    // Get holes from database
+    const holes = part.type === 'door' ? getHingeHolesFromDB(part) : getDrawerHoles(part);
     
-    // Draw holes with labels
-    holes.forEach((hole, i) => {
+    // Draw holes
+    holes.forEach((hole) => {
         const hx = offsetX + hole.x * scale;
         const hy = offsetY + (part.height - hole.y) * scale;
         const radius = Math.max(hole.diameter / 2 * scale, 4);
         
-        // Hole circle
         html += `<circle cx="${hx}" cy="${hy}" r="${radius}" fill="${hole.color}" stroke="#000" stroke-width="1.5"/>`;
         
-        // Hole label (diameter)
         if (showDimensions && hole.diameter > 0.5) {
-            const diaText = (hole.diameter * 25.4).toFixed(0) + 'mm';
-            html += `<text x="${hx}" y="${hy + 4}" fill="#fff" text-anchor="middle" font-size="10" font-weight="bold">${diaText}</text>`;
+            const diaText = (hole.diameter * 25.4).toFixed(1) + 'mm';
+            html += `<text x="${hx}" y="${hy + 4}" fill="#fff" text-anchor="middle" font-size="9" font-weight="bold">${diaText}</text>`;
         }
     });
     
-    // Dimension lines if enabled
+    // Dimension lines
     if (showDimensions) {
-        // Overall width (top)
         html += drawDimensionLine(offsetX, offsetY - 25, offsetX + partW, offsetY - 25, formatFraction(part.width), 'horizontal');
-        
-        // Overall height (left)
         html += drawDimensionLine(offsetX - 25, offsetY, offsetX - 25, offsetY + partH, formatFraction(part.height), 'vertical');
         
-        // Hole position dimensions
+        // Hole position dimensions for doors
         if (part.type === 'door' && holes.length > 0) {
-            const edgeSetback = holes[0].x;
-            const bottomHingeY = 3;
-            const topHingeY = part.height - 3;
-            
-            // Edge setback (bottom)
-            const setbackPx = edgeSetback * scale;
-            html += `<line x1="${offsetX}" y1="${offsetY + partH + 15}" x2="${offsetX + setbackPx}" y2="${offsetY + partH + 15}" stroke="#22d3ee" stroke-width="1"/>`;
-            html += `<text x="${offsetX + setbackPx/2}" y="${offsetY + partH + 28}" fill="#22d3ee" text-anchor="middle" font-size="11">${formatFraction(edgeSetback)}</text>`;
-            
-            // Bottom hinge from bottom edge (right side)
-            const bottomPx = bottomHingeY * scale;
-            html += `<line x1="${offsetX + partW + 15}" y1="${offsetY + partH}" x2="${offsetX + partW + 15}" y2="${offsetY + partH - bottomPx}" stroke="#22d3ee" stroke-width="1"/>`;
-            html += `<text x="${offsetX + partW + 30}" y="${offsetY + partH - bottomPx/2 + 4}" fill="#22d3ee" font-size="11">3"</text>`;
-            
-            // Top hinge from top edge
-            html += `<line x1="${offsetX + partW + 15}" y1="${offsetY}" x2="${offsetX + partW + 15}" y2="${offsetY + bottomPx}" stroke="#22d3ee" stroke-width="1"/>`;
-            html += `<text x="${offsetX + partW + 30}" y="${offsetY + bottomPx/2 + 4}" fill="#22d3ee" font-size="11">3"</text>`;
-        }
-        
-        if (part.type === 'drawer' && holes.length > 0) {
-            const inset = holes[0].x;
-            const insetPx = inset * scale;
-            
-            // Corner inset dimension
-            html += `<line x1="${offsetX}" y1="${offsetY + partH + 15}" x2="${offsetX + insetPx}" y2="${offsetY + partH + 15}" stroke="#22d3ee" stroke-width="1"/>`;
-            html += `<text x="${offsetX + insetPx/2}" y="${offsetY + partH + 28}" fill="#22d3ee" text-anchor="middle" font-size="11">${formatFraction(inset)}</text>`;
+            const cupHole = holes.find(h => h.diameter > 1); // Find the cup (largest hole)
+            if (cupHole) {
+                const setbackPx = cupHole.x * scale;
+                html += `<line x1="${offsetX}" y1="${offsetY + partH + 15}" x2="${offsetX + setbackPx}" y2="${offsetY + partH + 15}" stroke="#22d3ee" stroke-width="1"/>`;
+                html += `<text x="${offsetX + setbackPx/2}" y="${offsetY + partH + 28}" fill="#22d3ee" text-anchor="middle" font-size="10">${formatMM(cupHole.x)}</text>`;
+                
+                // Bottom hinge position
+                const bottomPx = cupHole.y * scale;
+                html += `<line x1="${offsetX + partW + 15}" y1="${offsetY + partH}" x2="${offsetX + partW + 15}" y2="${offsetY + partH - bottomPx}" stroke="#22d3ee" stroke-width="1"/>`;
+                html += `<text x="${offsetX + partW + 28}" y="${offsetY + partH - bottomPx/2 + 4}" fill="#22d3ee" font-size="10">${formatFraction(cupHole.y)}</text>`;
+            }
         }
     }
     
-    // Legend
-    html += `<g transform="translate(10, ${svgHeight - 60})">
-        <text fill="#94a3b8" font-size="11" font-weight="600">LEGEND:</text>
-        <circle cx="10" cy="20" r="6" fill="#dc2626"/><text x="22" y="24" fill="#94a3b8" font-size="10">35mm Hinge Cup</text>
-        <circle cx="10" cy="38" r="4" fill="#16a34a"/><text x="22" y="42" fill="#94a3b8" font-size="10">5mm Pilot Hole</text>
-        <circle cx="120" cy="20" r="4" fill="#d97706"/><text x="132" y="24" fill="#94a3b8" font-size="10">Drawer Attachment</text>
+    // Legend with selected hinge info
+    const hingeInfo = selectedHingeOID ? getHingeInfo(selectedHingeOID) : null;
+    const hingeName = hingeInfo ? hingeInfo.Name : 'None selected';
+    
+    html += `<g transform="translate(10, ${svgHeight - 70})">
+        <text fill="#94a3b8" font-size="11" font-weight="600">HINGE: ${hingeName}</text>
+        <circle cx="10" cy="20" r="6" fill="#dc2626"/><text x="22" y="24" fill="#94a3b8" font-size="10">Cup (35mm)</text>
+        <circle cx="10" cy="38" r="4" fill="#16a34a"/><text x="22" y="42" fill="#94a3b8" font-size="10">Pilot Hole</text>
+        <circle cx="120" cy="20" r="4" fill="#d97706"/><text x="132" y="24" fill="#94a3b8" font-size="10">Drawer</text>
     </g>`;
     
     svg.innerHTML = html;
 }
 
-// Draw a dimension line with text
+// Get hinge holes from database based on selected hinge
+function getHingeHolesFromDB(part) {
+    const holes = [];
+    
+    // Get template settings
+    const templateId = document.getElementById('hinge-template').value;
+    const template = DB.Hinging?.find(h => h.OID == templateId);
+    
+    // Hinge OID - prefer selected, fall back to template
+    const hingeOID = selectedHingeOID || (template ? parseInt(template.HingeOID) : 73);
+    
+    // Get hole pattern from database
+    const pattern = getHingeHolePattern(hingeOID);
+    
+    if (!pattern || pattern.length === 0) {
+        // Fallback to hardcoded if no pattern found
+        console.warn('No hole pattern found for hinge OID:', hingeOID);
+        return getHingeHolesFallback(part);
+    }
+    
+    // Get vertical positions from template
+    let bottomY = 3; // Default 3"
+    let topY = part.height - 3;
+    
+    if (template) {
+        bottomY = parseMeasurement(template.BottomHinge.replace('[top]-', '').replace('[top]', ''));
+        if (template.TopHinge.includes('[top]')) {
+            const offset = parseMeasurement(template.TopHinge.replace('[top]-', '').replace('[top]', ''));
+            topY = part.height - offset;
+        }
+    }
+    
+    // Find the cup hole (largest diameter) to get base X position
+    const cupHole = pattern.find(h => h.diameter > 1) || pattern[0];
+    const baseX = cupHole.xLocation;
+    
+    // Generate holes at both hinge positions
+    [bottomY, topY].forEach(hingeY => {
+        pattern.forEach(h => {
+            const isCup = h.diameter > 1;
+            holes.push({
+                x: h.xLocation,
+                y: hingeY + h.zLocation, // Z offset is vertical offset from hinge center
+                diameter: h.diameter,
+                depth: h.depth,
+                color: isCup ? '#dc2626' : '#16a34a',
+                label: isCup ? 'Cup' : 'Pilot'
+            });
+        });
+    });
+    
+    return holes;
+}
+
+// Fallback if database doesn't have pattern
+function getHingeHolesFallback(part) {
+    const holes = [];
+    const cupDia = 35 / 25.4;
+    const pilotDia = 8 / 25.4;
+    const pilotOffset = 22.5 / 25.4;
+    const edgeSetback = 22.5 / 25.4;
+    
+    [3, part.height - 3].forEach(hingeY => {
+        holes.push({ x: edgeSetback, y: hingeY, diameter: cupDia, color: '#dc2626' });
+        holes.push({ x: edgeSetback, y: hingeY - pilotOffset, diameter: pilotDia, color: '#16a34a' });
+        holes.push({ x: edgeSetback, y: hingeY + pilotOffset, diameter: pilotDia, color: '#16a34a' });
+    });
+    
+    return holes;
+}
+
+// Get drawer attachment holes
+function getDrawerHoles(part) {
+    const holes = [];
+    const holeDia = 5 / 25.4;
+    const inset = 1.5;
+    
+    holes.push({ x: inset, y: inset, diameter: holeDia, color: '#d97706' });
+    holes.push({ x: part.width - inset, y: inset, diameter: holeDia, color: '#d97706' });
+    holes.push({ x: inset, y: part.height - inset, diameter: holeDia, color: '#d97706' });
+    holes.push({ x: part.width - inset, y: part.height - inset, diameter: holeDia, color: '#d97706' });
+    
+    return holes;
+}
+
+// Format as mm for display
+function formatMM(inches) {
+    return (inches * 25.4).toFixed(1) + 'mm';
+}
+
 function drawDimensionLine(x1, y1, x2, y2, text, orientation) {
     let html = '';
     const tickSize = 6;
     
     if (orientation === 'horizontal') {
-        // Horizontal dimension
         html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#fff" stroke-width="1"/>`;
         html += `<line x1="${x1}" y1="${y1 - tickSize}" x2="${x1}" y2="${y1 + tickSize}" stroke="#fff" stroke-width="1"/>`;
         html += `<line x1="${x2}" y1="${y2 - tickSize}" x2="${x2}" y2="${y2 + tickSize}" stroke="#fff" stroke-width="1"/>`;
         html += `<text x="${(x1 + x2) / 2}" y="${y1 - 8}" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">${text}</text>`;
     } else {
-        // Vertical dimension
         html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#fff" stroke-width="1"/>`;
         html += `<line x1="${x1 - tickSize}" y1="${y1}" x2="${x1 + tickSize}" y2="${y1}" stroke="#fff" stroke-width="1"/>`;
         html += `<line x1="${x2 - tickSize}" y1="${y2}" x2="${x2 + tickSize}" y2="${y2}" stroke="#fff" stroke-width="1"/>`;
@@ -341,27 +483,23 @@ function drawDimensionLine(x1, y1, x2, y2, text, orientation) {
     return html;
 }
 
-// Toggle dimension display
 function toggleDimensions() {
     showDimensions = !showDimensions;
-    const btn = document.getElementById('btn-dimensions');
-    if (btn) btn.classList.toggle('active', showDimensions);
+    document.getElementById('btn-dimensions')?.classList.toggle('active', showDimensions);
     updatePreview();
 }
 
-// Toggle measure mode
 function toggleMeasure() {
     measureMode = !measureMode;
     measureStart = null;
     const btn = document.getElementById('btn-measure');
     if (btn) {
         btn.classList.toggle('active', measureMode);
-        btn.textContent = measureMode ? '📏 Click 2 points' : '📏';
+        btn.textContent = measureMode ? '📏 Click 2 pts' : '📏';
     }
     document.getElementById('preview').style.cursor = measureMode ? 'crosshair' : 'default';
 }
 
-// Handle measure click
 function handleMeasureClick(e) {
     if (!measureMode) return;
     
@@ -370,72 +508,30 @@ function handleMeasureClick(e) {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    // Convert to part coordinates
     const partX = (x - previewTransform.offsetX) / previewTransform.scale;
     const partY = previewTransform.partHeight - (y - previewTransform.offsetY) / previewTransform.scale;
     
     if (!measureStart) {
-        measureStart = { x: partX, y: partY, px: x, py: y };
+        measureStart = { x: partX, y: partY };
     } else {
         const dx = partX - measureStart.x;
         const dy = partY - measureStart.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        alert(`Distance: ${formatFraction(distance)}\n\nX: ${formatFraction(Math.abs(dx))}\nY: ${formatFraction(Math.abs(dy))}`);
+        alert(`Distance: ${formatFraction(distance)} (${formatMM(distance)})\n\nΔX: ${formatFraction(Math.abs(dx))}\nΔY: ${formatFraction(Math.abs(dy))}`);
         
         measureStart = null;
         measureMode = false;
         document.getElementById('btn-measure').textContent = '📏';
         document.getElementById('btn-measure').classList.remove('active');
-        svg.style.cursor = 'default';
+        document.getElementById('preview').style.cursor = 'default';
     }
 }
 
-// Get hinge hole positions for a door
-function getHingeHoles(part) {
-    const holes = [];
-    const cupDia = 35 / 25.4;      // 35mm cup = 1.378"
-    const pilotDia = 5 / 25.4;     // 5mm pilot = 0.197"
-    const pilotOffset = 1.024;     // Distance from cup center to pilot holes
-    const edgeSetback = 22 / 25.4; // 22mm from hinge side edge = 0.866"
-    
-    const bottomY = 3;             // 3" from bottom
-    const topY = part.height - 3;  // 3" from top
-    
-    // Bottom hinge - cup and pilots
-    holes.push({ x: edgeSetback, y: bottomY, diameter: cupDia, color: '#dc2626', label: '35mm Cup' });
-    holes.push({ x: edgeSetback, y: bottomY - pilotOffset, diameter: pilotDia, color: '#16a34a', label: '5mm Pilot' });
-    holes.push({ x: edgeSetback, y: bottomY + pilotOffset, diameter: pilotDia, color: '#16a34a', label: '5mm Pilot' });
-    
-    // Top hinge - cup and pilots
-    holes.push({ x: edgeSetback, y: topY, diameter: cupDia, color: '#dc2626', label: '35mm Cup' });
-    holes.push({ x: edgeSetback, y: topY - pilotOffset, diameter: pilotDia, color: '#16a34a', label: '5mm Pilot' });
-    holes.push({ x: edgeSetback, y: topY + pilotOffset, diameter: pilotDia, color: '#16a34a', label: '5mm Pilot' });
-    
-    return holes;
-}
-
-// Get drawer attachment hole positions
-function getDrawerHoles(part) {
-    const holes = [];
-    const holeDia = 5 / 25.4;  // 5mm
-    const inset = 1.5;         // 1.5" from edges
-    
-    // 4-corner pattern
-    holes.push({ x: inset, y: inset, diameter: holeDia, color: '#d97706', label: 'Attachment' });
-    holes.push({ x: part.width - inset, y: inset, diameter: holeDia, color: '#d97706', label: 'Attachment' });
-    holes.push({ x: inset, y: part.height - inset, diameter: holeDia, color: '#d97706', label: 'Attachment' });
-    holes.push({ x: part.width - inset, y: part.height - inset, diameter: holeDia, color: '#d97706', label: 'Attachment' });
-    
-    return holes;
-}
-
-// Zoom controls
 function zoomIn() { zoomLevel = Math.min(zoomLevel * 1.25, 3); updatePreview(); }
 function zoomOut() { zoomLevel = Math.max(zoomLevel / 1.25, 0.5); updatePreview(); }
 function resetZoom() { zoomLevel = 1; updatePreview(); }
 
-// Fraction formatting
 function formatFraction(decimal) {
     const whole = Math.floor(decimal);
     const frac = decimal - whole;
@@ -473,7 +569,6 @@ function parseFractionPart(str) {
     return num / den;
 }
 
-// DXF Export
 function exportSelectedDXF() {
     const partId = parseInt(document.getElementById('preview-select').value);
     const part = parts.find(p => p.id === partId);
@@ -492,7 +587,7 @@ function generateDXF(partsToExport) {
         let dxf = '0\nSECTION\n2\nHEADER\n0\nENDSEC\n';
         dxf += '0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n';
         
-        const layers = ['Outline', 'Door_Hinge_35mm_12mm', 'Door_Hinge_5mm_10mm', 'Drawer_Lock_5mm'];
+        const layers = ['Outline', 'Door_Hinge_35mm_13mm', 'Door_Hinge_8mm_13mm', 'Drawer_Lock_5mm'];
         layers.forEach(name => {
             dxf += `0\nLAYER\n2\n${name}\n70\n0\n62\n7\n6\nCONTINUOUS\n`;
         });
@@ -500,22 +595,16 @@ function generateDXF(partsToExport) {
         
         dxf += '0\nSECTION\n2\nENTITIES\n';
         
-        // Outline
         dxf += `0\nLWPOLYLINE\n8\nOutline\n90\n4\n70\n1\n`;
         dxf += `10\n0\n20\n0\n10\n${part.width}\n20\n0\n`;
         dxf += `10\n${part.width}\n20\n${part.height}\n10\n0\n20\n${part.height}\n`;
         
-        // Holes
-        const holes = part.type === 'door' ? getHingeHoles(part) : getDrawerHoles(part);
+        const holes = part.type === 'door' ? getHingeHolesFromDB(part) : getDrawerHoles(part);
         holes.forEach(hole => {
-            let layer;
-            if (hole.diameter > 0.5) {
-                layer = 'Door_Hinge_35mm_12mm';
-            } else if (part.type === 'door') {
-                layer = 'Door_Hinge_5mm_10mm';
-            } else {
-                layer = 'Drawer_Lock_5mm';
-            }
+            const depthMM = Math.round((hole.depth || 0.5) * 25.4);
+            const diaMM = Math.round(hole.diameter * 25.4);
+            let layer = hole.diameter > 1 ? `Door_Hinge_${diaMM}mm_${depthMM}mm` : 
+                        part.type === 'door' ? `Door_Hinge_${diaMM}mm_${depthMM}mm` : 'Drawer_Lock_5mm';
             dxf += `0\nCIRCLE\n8\n${layer}\n10\n${hole.x}\n20\n${hole.y}\n40\n${hole.diameter/2}\n`;
         });
         
