@@ -479,22 +479,37 @@ function printCutList() {
 function updatePreview() {
     if (!ctx) return;
     const W = canvas.width, H = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
     
-    // Background
-    ctx.fillStyle = '#0f172a';
+    // High DPI support
+    if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+        canvas.width = W * dpr;
+        canvas.height = H * dpr;
+        canvas.style.width = W + 'px';
+        canvas.style.height = H + 'px';
+        ctx.scale(dpr, dpr);
+    }
+    
+    ctx.clearRect(0, 0, W, H);
+    
+    // Background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#0f172a');
+    bgGrad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, W, H);
     
     const part = parts.find(p => p.id == document.getElementById('preview-select')?.value);
     if (!part) {
-        ctx.fillStyle = '#475569';
-        ctx.font = '14px sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 16px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('Add parts to see preview', W / 2, H / 2);
         return;
     }
     
     // Calculate transform
-    const pad = 80;
+    const pad = 100;
     const baseScale = Math.min((W - pad * 2) / part.width, (H - pad * 2) / part.height);
     const scale = baseScale * zoomLevel;
     const pw = part.width * scale;
@@ -504,88 +519,154 @@ function updatePreview() {
     
     previewTransform = { scale, offsetX: ox - panOffset.x, offsetY: oy - panOffset.y, partWidth: part.width, partHeight: part.height };
     
-    // Grid
-    ctx.strokeStyle = '#1e3a5f';
+    // Subtle grid
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.1)';
     ctx.lineWidth = 1;
     const gs = scale;
-    for (let x = ox % gs; x < W; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-    for (let y = oy % gs; y < H; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    if (gs > 10) {
+        for (let x = ox % gs; x < W; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+        for (let y = oy % gs; y < H; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    }
     
-    // Part rectangle with subtle gradient
-    const grad = ctx.createLinearGradient(ox, oy, ox + pw, oy + ph);
-    grad.addColorStop(0, '#1e293b');
-    grad.addColorStop(1, '#334155');
-    ctx.fillStyle = grad;
+    // Part shadow
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetX = 5;
+    ctx.shadowOffsetY = 5;
+    
+    // Part rectangle with wood-like gradient
+    const partGrad = ctx.createLinearGradient(ox, oy, ox + pw, oy + ph);
+    partGrad.addColorStop(0, '#d4a574');
+    partGrad.addColorStop(0.3, '#c4956a');
+    partGrad.addColorStop(0.7, '#b8895e');
+    partGrad.addColorStop(1, '#a67c52');
+    ctx.fillStyle = partGrad;
     ctx.fillRect(ox, oy, pw, ph);
     
+    // Reset shadow
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    
+    // Wood grain lines
+    ctx.strokeStyle = 'rgba(139, 90, 43, 0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < ph; i += 8) {
+        ctx.beginPath();
+        ctx.moveTo(ox, oy + i);
+        ctx.lineTo(ox + pw, oy + i + (Math.random() - 0.5) * 4);
+        ctx.stroke();
+    }
+    
     // Part outline
-    ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 3;
     ctx.strokeRect(ox, oy, pw, ph);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ox + 1, oy + 1, pw - 2, ph - 2);
     
     // Get holes
     const hingeSide = part.hingeSide || document.getElementById('hinge-side')?.value || 'left';
-    const hingeCount = parseInt(document.getElementById('hinge-count')?.value || '2');
+    const baseHingeCount = parseInt(document.getElementById('hinge-count')?.value || '2');
+    // Auto-add middle hinge for tall doors (over 40")
+    let hingeCount = baseHingeCount;
+    if (part.height > 40 && baseHingeCount === 2) {
+        hingeCount = 3;
+    }
+    if (part.height > 60 && hingeCount < 4) {
+        hingeCount = 4;
+    }
+    
     const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : getDrawerHoles(part);
     
-    // Draw holes
+    // Draw dimension callouts and dashed lines FIRST (behind holes)
+    if (showDimensions && part.type === 'door' && holes.length > 0) {
+        drawHingeSpecs(ctx, ox, oy, scale, part, holes, hingeSide);
+    }
+    
+    // Draw holes with modern styling
     holes.forEach(h => {
         const hx = ox + h.x * scale;
         const hy = oy + (part.height - h.y) * scale;
-        const r = Math.max(h.dia / 2 * scale, 3);
+        const r = Math.max(h.dia / 2 * scale, 4);
         
-        // Shadow
+        // Hole shadow/depth effect
+        const holeGrad = ctx.createRadialGradient(hx - r * 0.3, hy - r * 0.3, 0, hx, hy, r);
+        if (h.isCup) {
+            holeGrad.addColorStop(0, '#1f2937');
+            holeGrad.addColorStop(0.7, '#111827');
+            holeGrad.addColorStop(1, '#030712');
+        } else {
+            holeGrad.addColorStop(0, '#374151');
+            holeGrad.addColorStop(1, '#111827');
+        }
+        
+        // Outer ring (hole edge)
         ctx.beginPath();
-        ctx.arc(hx + 2, hy + 2, r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.arc(hx, hy, r + 2, 0, Math.PI * 2);
+        ctx.fillStyle = h.isCup ? '#dc2626' : '#22c55e';
         ctx.fill();
         
-        // Hole
+        // Inner hole
         ctx.beginPath();
         ctx.arc(hx, hy, r, 0, Math.PI * 2);
-        ctx.fillStyle = h.color;
+        ctx.fillStyle = holeGrad;
         ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
         
-        // Label
-        if (r > 12) {
+        // Highlight
+        ctx.beginPath();
+        ctx.arc(hx - r * 0.25, hy - r * 0.25, r * 0.3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.fill();
+        
+        // Diameter label for cups
+        if (h.isCup && r > 15) {
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 10px sans-serif';
+            ctx.font = 'bold 11px system-ui, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(Math.round(h.dia * 25.4), hx, hy);
+            ctx.fillText(Math.round(h.dia * 25.4) + 'mm', hx, hy);
         }
     });
     
-    // Dimensions
+    // Part dimensions
     if (showDimensions) {
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = 'bold 14px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         
-        // Width
-        ctx.fillText(formatDimension(part.width), ox + pw / 2, oy - 20);
+        // Width dimension with arrows
+        drawDimensionLine(ctx, ox, oy - 30, ox + pw, oy - 30, formatDimension(part.width));
         
-        // Height
+        // Height dimension
         ctx.save();
-        ctx.translate(ox - 25, oy + ph / 2);
+        ctx.translate(ox - 35, oy + ph / 2);
         ctx.rotate(-Math.PI / 2);
         ctx.fillText(formatDimension(part.height), 0, 0);
         ctx.restore();
         
         // Hinge side indicator
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillStyle = '#fbbf24';
+        ctx.font = '600 12px system-ui, sans-serif';
         if (hingeSide === 'left' || hingeSide === 'both') {
+            ctx.fillStyle = '#fbbf24';
             ctx.textAlign = 'left';
-            ctx.fillText('← HINGES', ox + 5, oy + ph / 2);
+            ctx.fillText('◀ HINGE SIDE', ox + 8, oy + ph - 15);
         }
         if (hingeSide === 'right' || hingeSide === 'both') {
+            ctx.fillStyle = '#fbbf24';
             ctx.textAlign = 'right';
-            ctx.fillText('HINGES →', ox + pw - 5, oy + ph / 2);
+            ctx.fillText('HINGE SIDE ▶', ox + pw - 8, oy + ph - 15);
+        }
+        
+        // Auto hinge count indicator
+        if (hingeCount !== baseHingeCount) {
+            ctx.fillStyle = '#f97316';
+            ctx.font = '500 10px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Auto: ${hingeCount} hinges (door > ${hingeCount === 4 ? '60' : '40'}")`, ox + pw / 2, oy + ph + 20);
         }
     }
     
@@ -594,65 +675,229 @@ function updatePreview() {
         const sx = ox + measureStart.x * scale;
         const sy = oy + (part.height - measureStart.y) * scale;
         
+        // Start point
         ctx.beginPath();
-        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = '#22d3ee';
+        ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+        ctx.fillStyle = '#06b6d4';
         ctx.fill();
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('1', sx, sy + 3);
         
         if (measureStart.endX !== undefined) {
             const ex = ox + measureStart.endX * scale;
             const ey = oy + (part.height - measureStart.endY) * scale;
             
+            // Line
             ctx.beginPath();
             ctx.moveTo(sx, sy);
             ctx.lineTo(ex, ey);
-            ctx.strokeStyle = '#22d3ee';
+            ctx.strokeStyle = '#06b6d4';
             ctx.lineWidth = 2;
+            ctx.setLineDash([5, 3]);
             ctx.stroke();
+            ctx.setLineDash([]);
             
+            // End point
             ctx.beginPath();
-            ctx.arc(ex, ey, 6, 0, Math.PI * 2);
-            ctx.fillStyle = '#22d3ee';
+            ctx.arc(ex, ey, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#06b6d4';
             ctx.fill();
             ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
             ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.fillText('2', ex, ey + 3);
             
             // Distance label
             const mx = (sx + ex) / 2, my = (sy + ey) / 2;
-            ctx.fillStyle = 'rgba(0,0,0,0.8)';
-            ctx.fillRect(mx - 35, my - 10, 70, 20);
-            ctx.fillStyle = '#22d3ee';
-            ctx.font = 'bold 11px sans-serif';
+            ctx.fillStyle = 'rgba(6, 182, 212, 0.95)';
+            roundRect(ctx, mx - 45, my - 12, 90, 24, 4);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 11px system-ui';
             ctx.textAlign = 'center';
-            ctx.fillText((measureStart.distance * 25.4).toFixed(1) + 'mm', mx, my + 4);
+            ctx.fillText((measureStart.distance * 25.4).toFixed(2) + ' mm', mx, my + 4);
         }
     }
     
-    // Legend bar
-    ctx.fillStyle = 'rgba(15,23,42,0.95)';
-    ctx.fillRect(0, H - 32, W, 32);
+    // Modern legend bar
+    const lgH = 36;
+    const lgGrad = ctx.createLinearGradient(0, H - lgH, 0, H);
+    lgGrad.addColorStop(0, 'rgba(15, 23, 42, 0.95)');
+    lgGrad.addColorStop(1, 'rgba(30, 41, 59, 0.98)');
+    ctx.fillStyle = lgGrad;
+    ctx.fillRect(0, H - lgH, W, lgH);
+    
+    // Top border
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, H - lgH);
+    ctx.lineTo(W, H - lgH);
+    ctx.stroke();
     
     const hinge = getHingeInfo(selectedHingeOID);
-    ctx.fillStyle = '#e2e8f0';
-    ctx.font = '11px sans-serif';
+    ctx.fillStyle = '#f1f5f9';
+    ctx.font = '600 12px system-ui, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(hinge?.Name || 'Select hinge', 10, H - 16);
+    ctx.fillText(hinge?.Name || 'Select a hinge', 12, H - lgH / 2);
     
     // Legend items
-    let lx = 180;
-    ctx.beginPath(); ctx.arc(lx, H - 16, 5, 0, Math.PI * 2); ctx.fillStyle = '#dc2626'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif';
-    ctx.fillText('Cup', lx + 10, H - 16);
+    let lx = 200;
+    ctx.beginPath(); ctx.arc(lx, H - lgH / 2, 6, 0, Math.PI * 2); ctx.fillStyle = '#dc2626'; ctx.fill();
+    ctx.fillStyle = '#94a3b8'; ctx.font = '500 11px system-ui';
+    ctx.fillText('35mm Cup', lx + 12, H - lgH / 2);
     
-    ctx.beginPath(); ctx.arc(lx + 50, H - 16, 4, 0, Math.PI * 2); ctx.fillStyle = '#22c55e'; ctx.fill();
-    ctx.fillText('Pilot', lx + 60, H - 16);
+    ctx.beginPath(); ctx.arc(lx + 90, H - lgH / 2, 5, 0, Math.PI * 2); ctx.fillStyle = '#22c55e'; ctx.fill();
+    ctx.fillText('8mm Pilot', lx + 100, H - lgH / 2);
     
+    // Zoom indicator
     ctx.textAlign = 'right';
-    ctx.fillText(`${Math.round(zoomLevel * 100)}%`, W - 10, H - 16);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(`Zoom: ${Math.round(zoomLevel * 100)}%`, W - 12, H - lgH / 2);
+}
+
+// Draw dimension line with arrows
+function drawDimensionLine(ctx, x1, y1, x2, y2, label) {
+    const arrowSize = 6;
+    
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    
+    // Arrows
+    ctx.fillStyle = '#94a3b8';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 + arrowSize, y1 - arrowSize / 2);
+    ctx.lineTo(x1 + arrowSize, y1 + arrowSize / 2);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - arrowSize, y2 - arrowSize / 2);
+    ctx.lineTo(x2 - arrowSize, y2 + arrowSize / 2);
+    ctx.fill();
+    
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, (x1 + x2) / 2, y1 - 8);
+}
+
+// Draw hinge manufacturer specs
+function drawHingeSpecs(ctx, ox, oy, scale, part, holes, hingeSide) {
+    const sides = hingeSide === 'both' ? ['left', 'right'] : [hingeSide];
+    
+    sides.forEach(side => {
+        // Find cup and pilot holes for this side
+        const sideHoles = holes.filter(h => {
+            const isLeftSide = h.x < part.width / 2;
+            return (side === 'left' && isLeftSide) || (side === 'right' && !isLeftSide);
+        });
+        
+        // Get first hinge set (bottom)
+        const cups = sideHoles.filter(h => h.isCup).sort((a, b) => a.y - b.y);
+        const pilots = sideHoles.filter(h => !h.isCup).sort((a, b) => a.y - b.y);
+        
+        if (cups.length === 0) return;
+        
+        const cup = cups[0];
+        const cupX = ox + cup.x * scale;
+        const cupY = oy + (part.height - cup.y) * scale;
+        const edgeX = side === 'left' ? ox : ox + part.width * scale;
+        
+        // Cup setback from edge - solid cyan line
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(edgeX, cupY);
+        ctx.lineTo(cupX, cupY);
+        ctx.stroke();
+        
+        // Setback dimension
+        const setback = cup.x * 25.4;
+        const setbackLabel = setback.toFixed(1) + 'mm';
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.9)';
+        const lblX = (edgeX + cupX) / 2;
+        roundRect(ctx, lblX - 25, cupY - 22, 50, 18, 3);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(setbackLabel, lblX, cupY - 10);
+        
+        // Dashed lines from cup to pilots
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        
+        // Find pilots associated with this cup (same hinge)
+        const cupPilots = pilots.filter(p => Math.abs(p.y - cup.y) < 3 || 
+            (Math.abs(p.y - (cup.y + 22.5/25.4)) < 1) || 
+            (Math.abs(p.y - (cup.y - 22.5/25.4)) < 1));
+        
+        cupPilots.forEach(pilot => {
+            const pilotX = ox + pilot.x * scale;
+            const pilotY = oy + (part.height - pilot.y) * scale;
+            
+            ctx.beginPath();
+            ctx.moveTo(cupX, cupY);
+            ctx.lineTo(pilotX, pilotY);
+            ctx.stroke();
+        });
+        
+        ctx.setLineDash([]);
+        
+        // Pilot offset specs (show once per side)
+        if (cupPilots.length > 0) {
+            const pilot = cupPilots[0];
+            const xOffset = Math.abs(pilot.x - cup.x) * 25.4;
+            const yOffset = Math.abs(pilot.y - cup.y) * 25.4;
+            
+            // Spec box
+            const specX = side === 'left' ? ox + 10 : ox + part.width * scale - 110;
+            const specY = oy + 10;
+            
+            ctx.fillStyle = 'rgba(168, 85, 247, 0.9)';
+            roundRect(ctx, specX, specY, 100, 42, 4);
+            ctx.fill();
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '600 9px system-ui';
+            ctx.textAlign = 'left';
+            ctx.fillText('PILOT FROM CUP:', specX + 6, specY + 12);
+            ctx.font = 'bold 10px system-ui';
+            ctx.fillText(`X: ${xOffset.toFixed(1)}mm`, specX + 6, specY + 26);
+            ctx.fillText(`Y: ±${yOffset.toFixed(1)}mm`, specX + 6, specY + 38);
+        }
+    });
+}
+
+// Rounded rectangle helper
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
 }
 
 function getHingeHoles(part, hingeSide, hingeCount) {
