@@ -16,7 +16,7 @@
             <button class="btn" onclick="showImportModal()">📥 Import CSV</button>
             <button class="btn" onclick="saveJob()">💾 Save Job</button>
             <button class="btn" onclick="loadJob()">📂 Load Job</button>
-            <button class="btn" onclick="printCutList()">🖨️ Print Cut List</button>
+            <button class="btn" onclick="printCutList()">🖨️ Cut List</button>
             <button class="btn btn-success" onclick="exportAllDXF()">📤 Export All DXF</button>
         </div>
     </div>
@@ -62,15 +62,16 @@
             </div>
             <div class="stat">
                 <div class="stat-value" id="stat-sheets">0</div>
-                <div class="stat-label">Sheets (4x8)</div>
+                <div class="stat-label">Sheets</div>
             </div>
         </div>
         
         <div class="grid">
             <!-- Left Panel -->
             <div class="left-panel">
+                <!-- Hardware Selection -->
                 <div class="card">
-                    <div class="card-header">Hardware Selection</div>
+                    <div class="card-header">Hardware</div>
                     <div class="card-body">
                         <div class="tab-bar">
                             <div class="tab active" data-tab="hinge">Hinges</div>
@@ -91,22 +92,40 @@
                     </div>
                 </div>
                 
+                <!-- Hinge Configuration -->
                 <div class="card">
-                    <div class="card-header">Hinge Template</div>
+                    <div class="card-header">Hinge Configuration</div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label>Vertical Position</label>
+                            <label>Hinge Side</label>
+                            <select id="hinge-side" onchange="updatePreview()">
+                                <option value="left">Left</option>
+                                <option value="right">Right</option>
+                                <option value="both">Both (Double Door)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Vertical Template</label>
                             <select id="hinge-template" onchange="updateHingeTemplate()"></select>
                         </div>
                         <div class="template-info">
                             <div><strong>Bottom:</strong> <span id="bottom-hinge">3"</span></div>
                             <div><strong>Top:</strong> <span id="top-hinge">[top]-3"</span></div>
                         </div>
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>Number of Hinges</label>
+                            <select id="hinge-count" onchange="updatePreview()">
+                                <option value="2">2 Hinges</option>
+                                <option value="3">3 Hinges</option>
+                                <option value="4">4 Hinges</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
                 
+                <!-- Settings -->
                 <div class="card">
-                    <div class="card-header">Material</div>
+                    <div class="card-header">Settings</div>
                     <div class="card-body">
                         <div class="form-group">
                             <label>Display Units</label>
@@ -117,7 +136,7 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Thickness</label>
+                            <label>Material Thickness</label>
                             <select id="material-thickness">
                                 <option value="0.75">3/4" (19mm)</option>
                                 <option value="0.625">5/8" (16mm)</option>
@@ -127,25 +146,15 @@
                         <div class="form-group">
                             <label>Sheet Size</label>
                             <select id="sheet-size" onchange="updateStats()">
-                                <option value="32">4' x 8' (32 sq ft)</option>
-                                <option value="40">5' x 8' (40 sq ft)</option>
-                                <option value="20">4' x 5' (20 sq ft)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Waste Factor</label>
-                            <select id="waste-factor" onchange="updateStats()">
-                                <option value="1.15">15% (Standard)</option>
-                                <option value="1.20">20% (Mixed sizes)</option>
-                                <option value="1.25">25% (Complex)</option>
-                                <option value="1.10">10% (Optimized)</option>
+                                <option value="32">4' × 8' (32 sq ft)</option>
+                                <option value="40">5' × 8' (40 sq ft)</option>
                             </select>
                         </div>
                     </div>
                 </div>
             </div>
             
-            <!-- Center Panel -->
+            <!-- Center Panel - Preview -->
             <div class="center-panel">
                 <div class="card preview-card">
                     <div class="card-header">
@@ -158,11 +167,11 @@
                         </div>
                         <div class="preview-controls">
                             <button class="btn btn-primary" onclick="exportSelectedDXF()">Export DXF</button>
-                            <button class="btn" onclick="zoomIn()">+</button>
-                            <button class="btn" onclick="zoomOut()">−</button>
-                            <button class="btn" onclick="resetZoom()">Reset</button>
-                            <button class="btn active" id="btn-dimensions" onclick="toggleDimensions()">Dims</button>
-                            <button class="btn" id="btn-measure" onclick="toggleMeasure()">Measure</button>
+                            <button class="btn" onclick="zoomIn()">➕</button>
+                            <button class="btn" onclick="zoomOut()">➖</button>
+                            <button class="btn" onclick="resetZoom()">⟲</button>
+                            <button class="btn active" id="btn-dimensions" onclick="toggleDimensions()">📐 Dims</button>
+                            <button class="btn" id="btn-measure" onclick="toggleMeasure()">📏 Measure</button>
                         </div>
                         <div class="measure-result" id="measure-result">Drag to pan • Scroll to zoom</div>
                     </div>
@@ -171,7 +180,7 @@
             
             <!-- Right Panel - Parts List -->
             <div class="right-panel">
-                <div class="card" style="flex:1;">
+                <div class="card parts-card">
                     <div class="card-header">
                         <span>Parts List</span>
                         <div>
@@ -184,12 +193,13 @@
                             <table class="parts-table">
                                 <thead>
                                     <tr>
-                                        <th style="width:30px;"></th>
+                                        <th style="width:25px;"></th>
                                         <th>Name</th>
-                                        <th style="width:65px;">Width</th>
-                                        <th style="width:65px;">Height</th>
-                                        <th style="width:70px;">Type</th>
-                                        <th style="width:30px;"></th>
+                                        <th style="width:60px;">W</th>
+                                        <th style="width:60px;">H</th>
+                                        <th style="width:65px;">Type</th>
+                                        <th style="width:55px;">Side</th>
+                                        <th style="width:25px;"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="parts-tbody"></tbody>
@@ -209,15 +219,14 @@
                 <button onclick="hideImportModal()" class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
-                <p>Paste CSV data or upload a file. Format:</p>
-                <code>Name, Width, Height, Type</code>
-                <p style="font-size:0.75rem;color:#666;margin-top:0.5rem;">
-                    Width/Height: Use fractions (15-1/2) or decimals (15.5)<br>
-                    Type: door or drawer
-                </p>
-                <textarea id="csv-input" placeholder="Upper Left, 15-1/2, 30, door
-Upper Right, 15-1/2, 30, door
-Base Door 1, 18, 24, door
+                <p>Paste CSV data or upload a file:</p>
+                <code>Name, Width, Height, Type, HingeSide</code>
+                <p class="hint">Width/Height: fractions (15-1/2) or decimals (15.5)<br>
+                Type: door or drawer<br>
+                HingeSide: left, right, or both (optional)</p>
+                <textarea id="csv-input" placeholder="Upper Left, 15-1/2, 30, door, left
+Upper Right, 15-1/2, 30, door, right
+Base 1, 18, 24, door, left
 Drawer 1, 18, 6, drawer
 Drawer 2, 18, 8, drawer"></textarea>
                 <div style="margin-top:0.5rem;">

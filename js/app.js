@@ -1,5 +1,5 @@
 // ShopFlow - Door Production Tool
-// CSV import, job management, material calculation
+// With hinge side selection, improved preview
 
 let DB = null;
 let parts = [];
@@ -9,7 +9,7 @@ let measureMode = false;
 let measureStart = null;
 let selectedHingeOID = null;
 let canvas, ctx;
-let displayUnits = 'fraction'; // 'fraction', 'decimal', 'metric'
+let displayUnits = 'fraction';
 
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     canvas = document.getElementById('preview');
     ctx = canvas.getContext('2d');
     
-    // Set today's date
     document.getElementById('job-date').valueAsDate = new Date();
     
     resizeCanvas();
@@ -34,8 +33,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     await loadDatabase();
     initUI();
-    
-    // Start with empty parts list
     parts = [];
     renderParts();
 });
@@ -81,8 +78,8 @@ function handleMouseUp() {
 
 function handleWheel(e) {
     e.preventDefault();
-    zoomLevel *= e.deltaY > 0 ? 0.9 : 1.1;
-    zoomLevel = Math.max(0.25, Math.min(5, zoomLevel));
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    zoomLevel = Math.max(0.25, Math.min(5, zoomLevel * delta));
     updatePreview();
 }
 
@@ -94,33 +91,31 @@ function handleMeasureClick(x, y) {
     const partY = t.partHeight - (y - t.offsetY - panOffset.y) / t.scale;
     
     if (!measureStart) {
-        measureStart = { x: partX, y: partY, screenX: x, screenY: y };
-        document.getElementById('btn-measure').textContent = 'Click End';
-        document.getElementById('measure-result').innerHTML = '<b>Start set.</b> Click second point.';
+        measureStart = { x: partX, y: partY };
+        document.getElementById('btn-measure').textContent = '📏 End Pt';
+        document.getElementById('measure-result').innerHTML = '✓ Start set. Click second point.';
         updatePreview();
     } else {
         const dx = partX - measureStart.x;
         const dy = partY - measureStart.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        
         measureStart.endX = partX;
         measureStart.endY = partY;
         measureStart.distance = dist;
         
         document.getElementById('measure-result').innerHTML = 
-            `<b>Distance:</b> ${formatDimension(dist)} (${(dist * 25.4).toFixed(2)}mm) | ` +
-            `<b>ΔX:</b> ${formatDimension(Math.abs(dx))} | <b>ΔY:</b> ${formatDimension(Math.abs(dy))}`;
+            `<b>Distance:</b> ${formatDimension(dist)} (${(dist * 25.4).toFixed(2)}mm) &nbsp;|&nbsp; ` +
+            `<b>ΔX:</b> ${formatDimension(Math.abs(dx))} &nbsp;|&nbsp; <b>ΔY:</b> ${formatDimension(Math.abs(dy))}`;
         
         updatePreview();
-        
         setTimeout(() => {
             measureStart = null;
             measureMode = false;
-            document.getElementById('btn-measure').textContent = 'Measure';
+            document.getElementById('btn-measure').textContent = '📏 Measure';
             document.getElementById('btn-measure').classList.remove('active');
             canvas.style.cursor = 'grab';
             updatePreview();
-        }, 3000);
+        }, 4000);
     }
 }
 
@@ -128,16 +123,12 @@ function handleMeasureClick(x, y) {
 async function loadDatabase() {
     try {
         const response = await fetch('data/CabinetSenseDB_combined.json');
-        const data = await response.json();
-        DB = data.tables;
-        
-        document.getElementById('db-info').textContent = 
-            `DB: ${DB.Hole?.length || 0} holes | ${DB.Part?.length || 0} parts`;
-        
+        DB = (await response.json()).tables;
+        document.getElementById('db-info').textContent = `${DB.Hole?.length || 0} holes | ${DB.Part?.length || 0} parts`;
         populateHardwareLists();
         populateHingeTemplates();
     } catch (error) {
-        console.error('Database error:', error);
+        console.error('DB Error:', error);
         document.getElementById('db-info').textContent = 'DB Error';
     }
 }
@@ -164,8 +155,7 @@ function getHingeHolePattern(oid) {
 }
 
 function getHingeInfo(oid) {
-    if (!DB?.Part) return null;
-    return DB.Part.find(p => String(p.OID) === String(oid));
+    return DB?.Part?.find(p => String(p.OID) === String(oid));
 }
 
 // === HARDWARE LISTS ===
@@ -173,93 +163,64 @@ function populateHardwareLists() {
     const hingeList = document.getElementById('hinge-list');
     const partsWithHoles = new Set(DB?.Hole?.map(h => String(h.OIDPart)) || []);
     
-    const hingeClasses = ['28', '15'];
     const hinges = DB?.Part?.filter(p => 
-        hingeClasses.includes(String(p.Class)) && 
-        partsWithHoles.has(String(p.OID))
+        ['28', '15'].includes(String(p.Class)) && partsWithHoles.has(String(p.OID))
     ) || [];
     
     let html = '';
-    
     const doorHinges = hinges.filter(h => String(h.Class) === '28');
     if (doorHinges.length) {
         html += '<div class="hardware-group">Door Hinges</div>';
-        html += doorHinges.map(h => {
-            const pattern = getHingeHolePattern(h.OID);
-            return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
-                <div class="name">${h.Name || 'Unnamed'}</div>
-                <div class="details">${pattern?.length || 0} holes</div>
-            </div>`;
-        }).join('');
+        html += doorHinges.map(h => `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
+            <div class="name">${h.Name || 'Unnamed'}</div>
+            <div class="details">${getHingeHolePattern(h.OID)?.length || 0} holes</div>
+        </div>`).join('');
     }
     
-    const hingeClips = hinges.filter(h => String(h.Class) === '15');
-    if (hingeClips.length) {
+    const clips = hinges.filter(h => String(h.Class) === '15');
+    if (clips.length) {
         html += '<div class="hardware-group">Hinge Clips</div>';
-        html += hingeClips.map(h => {
-            const pattern = getHingeHolePattern(h.OID);
-            return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
-                <div class="name">${h.Name || 'Unnamed'}</div>
-                <div class="details">${pattern?.length || 0} holes</div>
-            </div>`;
-        }).join('');
+        html += clips.map(h => `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
+            <div class="name">${h.Name || 'Unnamed'}</div>
+        </div>`).join('');
     }
     
-    hingeList.innerHTML = html || '<div style="padding:10px;color:#666;">No hinges</div>';
-    if (doorHinges.length > 0) selectHinge(doorHinges[0].OID);
+    hingeList.innerHTML = html || '<div style="padding:8px;color:#888;">No hinges found</div>';
+    if (doorHinges.length) selectHinge(doorHinges[0].OID);
     
     // Slides
     const slideList = document.getElementById('slide-list');
-    const slideSystems = DB?.Part?.filter(p => 
-        String(p.Class) === '25' && partsWithHoles.has(String(p.OID))
-    ) || [];
-    
+    const slides = DB?.Part?.filter(p => String(p.Class) === '25' && partsWithHoles.has(String(p.OID))) || [];
     const byMfr = {};
-    slideSystems.forEach(s => {
-        const name = s.Name || '';
+    slides.forEach(s => {
         let mfr = 'Other';
-        ['Blum', 'Hettich', 'Grass', 'Salice', 'KV', 'Hafele'].forEach(m => {
-            if (name.includes(m)) mfr = m;
-        });
-        if (!byMfr[mfr]) byMfr[mfr] = [];
-        byMfr[mfr].push(s);
+        ['Blum', 'Hettich', 'Grass', 'Salice', 'KV', 'Hafele'].forEach(m => { if ((s.Name || '').includes(m)) mfr = m; });
+        (byMfr[mfr] = byMfr[mfr] || []).push(s);
     });
     
     let slideHtml = '';
-    for (const [mfr, systems] of Object.entries(byMfr).sort()) {
+    Object.entries(byMfr).sort().forEach(([mfr, items]) => {
         slideHtml += `<div class="hardware-group">${mfr}</div>`;
-        slideHtml += systems.map(s => 
-            `<div class="hardware-item" data-oid="${s.OID}" onclick="selectSlide('${s.OID}')">
-                <div class="name">${s.Name}</div>
-            </div>`
-        ).join('');
-    }
-    slideList.innerHTML = slideHtml || '<div style="padding:10px;color:#666;">No slides</div>';
+        slideHtml += items.map(s => `<div class="hardware-item" data-oid="${s.OID}"><div class="name">${s.Name}</div></div>`).join('');
+    });
+    slideList.innerHTML = slideHtml || '<div style="padding:8px;color:#888;">No slides</div>';
 }
 
 function selectHinge(oid) {
     selectedHingeOID = String(oid);
     document.querySelectorAll('#hinge-list .hardware-item').forEach(el => {
-        el.classList.toggle('selected', String(el.dataset.oid) === selectedHingeOID);
+        el.classList.toggle('selected', el.dataset.oid === selectedHingeOID);
     });
     updatePreview();
-}
-
-function selectSlide(oid) {
-    document.querySelectorAll('#slide-list .hardware-item').forEach(el => {
-        el.classList.toggle('selected', String(el.dataset.oid) === String(oid));
-    });
 }
 
 function populateHingeTemplates() {
     const select = document.getElementById('hinge-template');
     if (!DB?.Hinging) return;
-    
     select.innerHTML = DB.Hinging.map(h => {
         const hinge = getHingeInfo(h.HingeOID);
         return `<option value="${h.OID}" data-hinge-oid="${h.HingeOID}">${h.Template} - ${hinge?.Name || '?'}</option>`;
     }).join('');
-    
     updateHingeTemplate();
 }
 
@@ -286,12 +247,6 @@ function initUI() {
     canvas.style.cursor = 'grab';
 }
 
-function updateUnits() {
-    displayUnits = document.getElementById('display-units').value;
-    renderParts();
-    updatePreview();
-}
-
 function filterHardware(type) {
     const search = document.getElementById(type + '-search').value.toLowerCase();
     document.querySelectorAll(`#${type}-list .hardware-item`).forEach(item => {
@@ -301,7 +256,8 @@ function filterHardware(type) {
 
 // === PARTS MANAGEMENT ===
 function renderParts() {
-    document.getElementById('parts-tbody').innerHTML = parts.map((p, i) => `
+    const defaultSide = document.getElementById('hinge-side')?.value || 'left';
+    document.getElementById('parts-tbody').innerHTML = parts.map(p => `
         <tr data-id="${p.id}">
             <td><input type="checkbox" ${p.selected !== false ? 'checked' : ''} onchange="togglePart(${p.id})"></td>
             <td><input value="${p.name}" onchange="updatePart(${p.id},'name',this.value)"></td>
@@ -311,10 +267,14 @@ function renderParts() {
                 <option ${p.type==='door'?'selected':''}>door</option>
                 <option ${p.type==='drawer'?'selected':''}>drawer</option>
             </select></td>
+            <td><select onchange="updatePart(${p.id},'hingeSide',this.value)">
+                <option value="left" ${p.hingeSide==='left'?'selected':''}>L</option>
+                <option value="right" ${p.hingeSide==='right'?'selected':''}>R</option>
+                <option value="both" ${p.hingeSide==='both'?'selected':''}>LR</option>
+            </select></td>
             <td><button onclick="removePart(${p.id})" class="btn-delete">×</button></td>
         </tr>
     `).join('');
-    
     updateStats();
     populatePreviewSelect();
     updatePreview();
@@ -327,16 +287,13 @@ function togglePart(id) {
 
 function updatePart(id, field, value) {
     const p = parts.find(x => x.id === id);
-    if (p) { 
-        p[field] = value; 
-        updateStats();
-        updatePreview(); 
-    }
+    if (p) { p[field] = value; updateStats(); updatePreview(); }
 }
 
 function addPart() {
     const id = parts.length ? Math.max(...parts.map(p => p.id)) + 1 : 1;
-    parts.push({ id, name: 'Part ' + id, width: 18, height: 24, type: 'door', selected: true });
+    const defaultSide = document.getElementById('hinge-side')?.value || 'left';
+    parts.push({ id, name: 'Door ' + id, width: 15, height: 30, type: 'door', hingeSide: defaultSide, selected: true });
     renderParts();
 }
 
@@ -346,57 +303,46 @@ function removePart(id) {
 }
 
 function clearAllParts() {
-    if (parts.length === 0 || confirm('Clear all parts?')) {
-        parts = [];
-        renderParts();
-    }
+    if (!parts.length || confirm('Clear all parts?')) { parts = []; renderParts(); }
 }
 
 function updateStats() {
-    const doors = parts.filter(p => p.type === 'door');
-    const drawers = parts.filter(p => p.type === 'drawer');
-    
-    // Calculate square footage
-    const totalSqIn = parts.reduce((sum, p) => sum + (p.width * p.height), 0);
-    const totalSqFt = totalSqIn / 144;
-    
-    // Calculate sheets needed
-    const sheetSize = parseFloat(document.getElementById('sheet-size')?.value || 32);
-    const wasteFactor = parseFloat(document.getElementById('waste-factor')?.value || 1.15);
-    const sheetsNeeded = Math.ceil((totalSqFt * wasteFactor) / sheetSize);
+    const doors = parts.filter(p => p.type === 'door').length;
+    const drawers = parts.filter(p => p.type === 'drawer').length;
+    const sqFt = parts.reduce((s, p) => s + p.width * p.height / 144, 0);
+    const sheetSqFt = parseFloat(document.getElementById('sheet-size')?.value || 32);
+    const sheets = Math.ceil(sqFt * 1.15 / sheetSqFt);
     
     document.getElementById('stat-parts').textContent = parts.length;
-    document.getElementById('stat-doors').textContent = doors.length;
-    document.getElementById('stat-drawers').textContent = drawers.length;
-    document.getElementById('stat-sqft').textContent = totalSqFt.toFixed(1);
-    document.getElementById('stat-sheets').textContent = sheetsNeeded || 0;
+    document.getElementById('stat-doors').textContent = doors;
+    document.getElementById('stat-drawers').textContent = drawers;
+    document.getElementById('stat-sqft').textContent = sqFt.toFixed(1);
+    document.getElementById('stat-sheets').textContent = sheets;
 }
 
 function populatePreviewSelect() {
     const select = document.getElementById('preview-select');
     select.innerHTML = parts.length ? parts.map(p => 
         `<option value="${p.id}">${p.name} (${formatDimension(p.width)} × ${formatDimension(p.height)})</option>`
-    ).join('') : '<option>No parts</option>';
+    ).join('') : '<option>Add parts to preview</option>';
 }
 
-// === CSV IMPORT ===
-function showImportModal() {
-    document.getElementById('import-modal').style.display = 'flex';
+function updateUnits() {
+    displayUnits = document.getElementById('display-units').value;
+    renderParts();
 }
 
-function hideImportModal() {
-    document.getElementById('import-modal').style.display = 'none';
-}
+// === CSV IMPORT/EXPORT ===
+function showImportModal() { document.getElementById('import-modal').style.display = 'flex'; }
+function hideImportModal() { document.getElementById('import-modal').style.display = 'none'; }
 
-function loadCSVFile(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        document.getElementById('csv-input').value = e.target.result;
-    };
-    reader.readAsText(file);
+function loadCSVFile(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (ev) => { document.getElementById('csv-input').value = ev.target.result; };
+        reader.readAsText(file);
+    }
 }
 
 function importCSV() {
@@ -404,33 +350,35 @@ function importCSV() {
     if (!text) return;
     
     const lines = text.split('\n').filter(l => l.trim());
-    const newParts = [];
     let nextId = parts.length ? Math.max(...parts.map(p => p.id)) + 1 : 1;
+    const newParts = [];
     
     lines.forEach((line, i) => {
-        // Skip header row if detected
         if (i === 0 && line.toLowerCase().includes('name') && line.toLowerCase().includes('width')) return;
-        
         const cols = line.split(/[,\t]/).map(c => c.trim());
         if (cols.length >= 3) {
-            const name = cols[0] || `Part ${nextId}`;
-            const width = parseFraction(cols[1]);
-            const height = parseFraction(cols[2]);
-            const type = (cols[3] || 'door').toLowerCase().includes('drawer') ? 'drawer' : 'door';
-            
+            const width = parseDimension(cols[1]);
+            const height = parseDimension(cols[2]);
             if (width > 0 && height > 0) {
-                newParts.push({ id: nextId++, name, width, height, type, selected: true });
+                newParts.push({
+                    id: nextId++,
+                    name: cols[0] || `Part ${nextId}`,
+                    width, height,
+                    type: (cols[3] || 'door').toLowerCase().includes('drawer') ? 'drawer' : 'door',
+                    hingeSide: (cols[4] || 'left').toLowerCase().trim() || 'left',
+                    selected: true
+                });
             }
         }
     });
     
-    if (newParts.length > 0) {
+    if (newParts.length) {
         parts = [...parts, ...newParts];
         renderParts();
         hideImportModal();
         document.getElementById('csv-input').value = '';
     } else {
-        alert('No valid parts found. Check format:\nName, Width, Height, Type');
+        alert('No valid parts found. Format: Name, Width, Height, Type, HingeSide');
     }
 }
 
@@ -443,9 +391,9 @@ function getJobData() {
         notes: document.getElementById('job-notes').value,
         hingeOID: selectedHingeOID,
         hingeTemplate: document.getElementById('hinge-template').value,
-        materialThickness: document.getElementById('material-thickness').value,
-        displayUnits: displayUnits,
-        parts: parts
+        hingeSide: document.getElementById('hinge-side').value,
+        hingeCount: document.getElementById('hinge-count').value,
+        displayUnits, parts
     };
 }
 
@@ -454,28 +402,21 @@ function setJobData(data) {
     document.getElementById('customer-name').value = data.customer || '';
     document.getElementById('job-date').value = data.date || '';
     document.getElementById('job-notes').value = data.notes || '';
-    
     if (data.hingeOID) selectHinge(data.hingeOID);
     if (data.hingeTemplate) document.getElementById('hinge-template').value = data.hingeTemplate;
-    if (data.materialThickness) document.getElementById('material-thickness').value = data.materialThickness;
-    if (data.displayUnits) {
-        displayUnits = data.displayUnits;
-        document.getElementById('display-units').value = displayUnits;
-    }
-    
+    if (data.hingeSide) document.getElementById('hinge-side').value = data.hingeSide;
+    if (data.hingeCount) document.getElementById('hinge-count').value = data.hingeCount;
+    if (data.displayUnits) { displayUnits = data.displayUnits; document.getElementById('display-units').value = displayUnits; }
     parts = data.parts || [];
     renderParts();
 }
 
 function saveJob() {
     const data = getJobData();
-    const json = JSON.stringify(data, null, 2);
-    const filename = `${data.jobNumber || 'job'}_${data.customer || 'customer'}.json`.replace(/\s+/g, '_');
-    
-    const blob = new Blob([json], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = filename;
+    a.download = `${data.jobNumber || 'job'}_${data.customer || 'customer'}.json`.replace(/\s+/g, '_');
     a.click();
 }
 
@@ -483,72 +424,50 @@ function loadJob() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    input.onchange = (e) => {
+    input.onchange = e => {
         const file = e.target.files[0];
-        if (!file) return;
-        
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = JSON.parse(e.target.result);
-                setJobData(data);
-            } catch (err) {
-                alert('Invalid job file');
-            }
-        };
-        reader.readAsText(file);
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = ev => {
+                try { setJobData(JSON.parse(ev.target.result)); }
+                catch { alert('Invalid job file'); }
+            };
+            reader.readAsText(file);
+        }
     };
     input.click();
 }
 
 function printCutList() {
-    const jobNum = document.getElementById('job-number').value || 'N/A';
-    const customer = document.getElementById('customer-name').value || 'N/A';
-    const date = document.getElementById('job-date').value || 'N/A';
-    const notes = document.getElementById('job-notes').value || '';
+    const job = getJobData();
     const hinge = getHingeInfo(selectedHingeOID);
+    const sqFt = parts.reduce((s, p) => s + p.width * p.height / 144, 0);
     
-    const totalSqFt = parts.reduce((sum, p) => sum + (p.width * p.height / 144), 0);
-    
-    let html = `
-        <html><head><title>Cut List - ${jobNum}</title>
-        <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { font-size: 18px; margin-bottom: 5px; }
-            .info { font-size: 12px; color: #666; margin-bottom: 15px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
-            th { background: #f5f5f5; }
-            .summary { margin-top: 15px; font-size: 12px; }
-        </style></head><body>
-        <h1>Cut List: ${jobNum}</h1>
-        <div class="info">
-            <strong>Customer:</strong> ${customer} | 
-            <strong>Date:</strong> ${date} | 
-            <strong>Hinge:</strong> ${hinge?.Name || 'N/A'}<br>
-            ${notes ? `<strong>Notes:</strong> ${notes}` : ''}
-        </div>
-        <table>
-            <tr><th>#</th><th>Name</th><th>Width</th><th>Height</th><th>Type</th><th>Sq In</th></tr>
-            ${parts.map((p, i) => `
-                <tr>
-                    <td>${i + 1}</td>
-                    <td>${p.name}</td>
-                    <td>${formatDimension(p.width)}</td>
-                    <td>${formatDimension(p.height)}</td>
-                    <td>${p.type}</td>
-                    <td>${(p.width * p.height).toFixed(1)}</td>
-                </tr>
-            `).join('')}
-        </table>
-        <div class="summary">
-            <strong>Total Parts:</strong> ${parts.length} | 
-            <strong>Doors:</strong> ${parts.filter(p => p.type === 'door').length} | 
-            <strong>Drawers:</strong> ${parts.filter(p => p.type === 'drawer').length} | 
-            <strong>Total Sq Ft:</strong> ${totalSqFt.toFixed(2)}
-        </div>
-        </body></html>
-    `;
+    const html = `<!DOCTYPE html><html><head><title>Cut List - ${job.jobNumber}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+        h1 { font-size: 16px; margin-bottom: 5px; }
+        .info { color: #666; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
+        th { background: #f5f5f5; }
+        .summary { margin-top: 15px; font-weight: bold; }
+    </style></head><body>
+    <h1>Cut List: ${job.jobNumber}</h1>
+    <div class="info">
+        <b>Customer:</b> ${job.customer} | <b>Date:</b> ${job.date} | <b>Hinge:</b> ${hinge?.Name || 'N/A'}<br>
+        ${job.notes ? `<b>Notes:</b> ${job.notes}` : ''}
+    </div>
+    <table>
+        <tr><th>#</th><th>Name</th><th>Width</th><th>Height</th><th>Type</th><th>Hinge Side</th></tr>
+        ${parts.map((p, i) => `<tr>
+            <td>${i + 1}</td><td>${p.name}</td><td>${formatDimension(p.width)}</td>
+            <td>${formatDimension(p.height)}</td><td>${p.type}</td><td>${p.hingeSide}</td>
+        </tr>`).join('')}
+    </table>
+    <div class="summary">Total: ${parts.length} parts | ${parts.filter(p=>p.type==='door').length} doors | 
+    ${parts.filter(p=>p.type==='drawer').length} drawers | ${sqFt.toFixed(2)} sq ft</div>
+    </body></html>`;
     
     const win = window.open('', '_blank');
     win.document.write(html);
@@ -556,30 +475,32 @@ function printCutList() {
     win.print();
 }
 
-// === PREVIEW ===
+// === PREVIEW CANVAS ===
 function updatePreview() {
     if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+    
+    // Background
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, W, H);
     
     const part = parts.find(p => p.id == document.getElementById('preview-select')?.value);
-    
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
     if (!part) {
-        ctx.fillStyle = '#64748b';
+        ctx.fillStyle = '#475569';
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Add parts to preview', canvas.width/2, canvas.height/2);
+        ctx.fillText('Add parts to see preview', W / 2, H / 2);
         return;
     }
     
-    const pad = 70;
-    const baseScale = Math.min((canvas.width - pad*2) / part.width, (canvas.height - pad*2) / part.height);
+    // Calculate transform
+    const pad = 80;
+    const baseScale = Math.min((W - pad * 2) / part.width, (H - pad * 2) / part.height);
     const scale = baseScale * zoomLevel;
-    const W = part.width * scale;
-    const H = part.height * scale;
-    const ox = (canvas.width - W) / 2 + panOffset.x;
-    const oy = (canvas.height - H) / 2 + panOffset.y;
+    const pw = part.width * scale;
+    const ph = part.height * scale;
+    const ox = (W - pw) / 2 + panOffset.x;
+    const oy = (H - ph) / 2 + panOffset.y;
     
     previewTransform = { scale, offsetX: ox - panOffset.x, offsetY: oy - panOffset.y, partWidth: part.width, partHeight: part.height };
     
@@ -587,67 +508,88 @@ function updatePreview() {
     ctx.strokeStyle = '#1e3a5f';
     ctx.lineWidth = 1;
     const gs = scale;
-    for (let x = ox % gs; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
-    for (let y = oy % gs; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+    for (let x = ox % gs; x < W; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = oy % gs; y < H; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
     
-    // Part
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(ox, oy, W, H);
+    // Part rectangle with subtle gradient
+    const grad = ctx.createLinearGradient(ox, oy, ox + pw, oy + ph);
+    grad.addColorStop(0, '#1e293b');
+    grad.addColorStop(1, '#334155');
+    ctx.fillStyle = grad;
+    ctx.fillRect(ox, oy, pw, ph);
+    
+    // Part outline
     ctx.strokeStyle = '#3b82f6';
     ctx.lineWidth = 2;
-    ctx.strokeRect(ox, oy, W, H);
+    ctx.strokeRect(ox, oy, pw, ph);
     
-    // Holes
-    const holes = part.type === 'door' ? getHingeHoles(part) : getDrawerHoles(part);
+    // Get holes
+    const hingeSide = part.hingeSide || document.getElementById('hinge-side')?.value || 'left';
+    const hingeCount = parseInt(document.getElementById('hinge-count')?.value || '2');
+    const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : getDrawerHoles(part);
     
+    // Draw holes
     holes.forEach(h => {
         const hx = ox + h.x * scale;
         const hy = oy + (part.height - h.y) * scale;
-        const r = Math.max(h.dia / 2 * scale, 4);
+        const r = Math.max(h.dia / 2 * scale, 3);
         
+        // Shadow
+        ctx.beginPath();
+        ctx.arc(hx + 2, hy + 2, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fill();
+        
+        // Hole
         ctx.beginPath();
         ctx.arc(hx, hy, r, 0, Math.PI * 2);
         ctx.fillStyle = h.color;
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         
-        if (r > 10) {
+        // Label
+        if (r > 12) {
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(Math.round(h.dia * 25.4) + '', hx, hy);
+            ctx.fillText(Math.round(h.dia * 25.4), hx, hy);
         }
     });
     
     // Dimensions
     if (showDimensions) {
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 12px sans-serif';
+        ctx.font = 'bold 13px sans-serif';
         ctx.textAlign = 'center';
-        ctx.setLineDash([]);
-        ctx.fillText(formatDimension(part.width), ox + W/2, oy - 15);
+        ctx.textBaseline = 'middle';
         
+        // Width
+        ctx.fillText(formatDimension(part.width), ox + pw / 2, oy - 20);
+        
+        // Height
         ctx.save();
-        ctx.translate(ox - 15, oy + H/2);
-        ctx.rotate(-Math.PI/2);
+        ctx.translate(ox - 25, oy + ph / 2);
+        ctx.rotate(-Math.PI / 2);
         ctx.fillText(formatDimension(part.height), 0, 0);
         ctx.restore();
         
-        // Hole callouts
-        if (part.type === 'door' && holes.length) {
-            const cup = holes.find(h => h.isCup);
-            if (cup) {
-                ctx.fillStyle = '#22d3ee';
-                ctx.font = '10px sans-serif';
-                ctx.fillText(`Cup: ${(cup.x * 25.4).toFixed(1)}mm from edge`, ox + W/2, oy + H + 20);
-            }
+        // Hinge side indicator
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        if (hingeSide === 'left' || hingeSide === 'both') {
+            ctx.textAlign = 'left';
+            ctx.fillText('← HINGES', ox + 5, oy + ph / 2);
+        }
+        if (hingeSide === 'right' || hingeSide === 'both') {
+            ctx.textAlign = 'right';
+            ctx.fillText('HINGES →', ox + pw - 5, oy + ph / 2);
         }
     }
     
-    // Measure visualization
+    // Measure line
     if (measureStart) {
         const sx = ox + measureStart.x * scale;
         const sy = oy + (part.height - measureStart.y) * scale;
@@ -678,57 +620,76 @@ function updatePreview() {
             ctx.strokeStyle = '#fff';
             ctx.stroke();
             
+            // Distance label
+            const mx = (sx + ex) / 2, my = (sy + ey) / 2;
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(mx - 35, my - 10, 70, 20);
             ctx.fillStyle = '#22d3ee';
             ctx.font = 'bold 11px sans-serif';
-            ctx.fillText((measureStart.distance * 25.4).toFixed(2) + 'mm', (sx + ex) / 2, (sy + ey) / 2 - 10);
+            ctx.textAlign = 'center';
+            ctx.fillText((measureStart.distance * 25.4).toFixed(1) + 'mm', mx, my + 4);
         }
     }
     
-    // Legend
+    // Legend bar
     ctx.fillStyle = 'rgba(15,23,42,0.95)';
-    ctx.fillRect(0, canvas.height - 35, canvas.width, 35);
+    ctx.fillRect(0, H - 32, W, 32);
     
-    const info = selectedHingeOID ? getHingeInfo(selectedHingeOID) : null;
-    ctx.fillStyle = '#fff';
+    const hinge = getHingeInfo(selectedHingeOID);
+    ctx.fillStyle = '#e2e8f0';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(info?.Name || 'Select hinge', 10, canvas.height - 18);
+    ctx.fillText(hinge?.Name || 'Select hinge', 10, H - 16);
+    
+    // Legend items
+    let lx = 180;
+    ctx.beginPath(); ctx.arc(lx, H - 16, 5, 0, Math.PI * 2); ctx.fillStyle = '#dc2626'; ctx.fill();
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif';
+    ctx.fillText('Cup', lx + 10, H - 16);
+    
+    ctx.beginPath(); ctx.arc(lx + 50, H - 16, 4, 0, Math.PI * 2); ctx.fillStyle = '#22c55e'; ctx.fill();
+    ctx.fillText('Pilot', lx + 60, H - 16);
     
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#64748b';
-    ctx.fillText(`${Math.round(zoomLevel * 100)}%`, canvas.width - 10, canvas.height - 18);
+    ctx.fillText(`${Math.round(zoomLevel * 100)}%`, W - 10, H - 16);
 }
 
-function getHingeHoles(part) {
+function getHingeHoles(part, hingeSide, hingeCount) {
     const holes = [];
     const template = DB?.Hinging?.find(h => String(h.OID) === document.getElementById('hinge-template')?.value);
-    const oid = selectedHingeOID || (template?.HingeOID ? String(template.HingeOID) : '73');
+    const oid = selectedHingeOID || template?.HingeOID || '73';
     const pattern = getHingeHolePattern(oid);
     
-    if (!pattern?.length) return getHingeHolesFallback(part);
+    if (!pattern?.length) return getHingeHolesFallback(part, hingeSide, hingeCount);
     
-    let bottomY = 3, topY = part.height - 3;
-    if (template) {
-        const bv = template.BottomHinge.replace(/\[.*?\]/g, '').replace('-','').trim();
-        bottomY = parseMM(bv) || 3;
-        const tv = template.TopHinge.replace('[top]', '').replace('-','').trim();
-        topY = part.height - (parseMM(tv) || 3);
+    // Calculate Y positions based on hinge count
+    const bottomY = 3;
+    const topY = part.height - 3;
+    let yPositions = [bottomY, topY];
+    
+    if (hingeCount >= 3) {
+        yPositions.push(part.height / 2);
+    }
+    if (hingeCount >= 4) {
+        yPositions.push(part.height * 0.33);
+        yPositions.push(part.height * 0.67);
+        yPositions = [bottomY, part.height * 0.33, part.height * 0.67, topY];
     }
     
-    const cupHole = pattern.find(h => h.dia > 1);
-    const cupX = cupHole ? cupHole.x : pattern[0].x;
+    const sides = hingeSide === 'both' ? ['left', 'right'] : [hingeSide];
     
-    [bottomY, topY].forEach(hingeY => {
-        pattern.forEach(h => {
-            const isCup = h.dia > 1;
-            holes.push({
-                x: h.x,
-                y: hingeY + h.z,
-                dia: h.dia,
-                depth: h.depth,
-                color: isCup ? '#dc2626' : '#16a34a',
-                isCup: isCup
+    sides.forEach(side => {
+        yPositions.forEach(hingeY => {
+            pattern.forEach(h => {
+                const isCup = h.dia > 1;
+                const x = side === 'right' ? part.width - h.x : h.x;
+                holes.push({
+                    x, y: hingeY + h.z,
+                    dia: h.dia, depth: h.depth,
+                    color: isCup ? '#dc2626' : '#22c55e',
+                    isCup
+                });
             });
         });
     });
@@ -736,26 +697,37 @@ function getHingeHoles(part) {
     return holes;
 }
 
-function getHingeHolesFallback(part) {
-    const cupX = 22.5/25.4, pilotX = 32/25.4, zOff = 22.5/25.4;
-    const cupD = 35/25.4, pilotD = 8/25.4;
+function getHingeHolesFallback(part, hingeSide, hingeCount) {
+    const cupX = 22.5 / 25.4, pilotX = 32 / 25.4, zOff = 22.5 / 25.4;
+    const cupD = 35 / 25.4, pilotD = 8 / 25.4;
     const holes = [];
     
-    [3, part.height - 3].forEach(y => {
-        holes.push({ x: cupX, y, dia: cupD, color: '#dc2626', isCup: true });
-        holes.push({ x: pilotX, y: y - zOff, dia: pilotD, color: '#16a34a', isCup: false });
-        holes.push({ x: pilotX, y: y + zOff, dia: pilotD, color: '#16a34a', isCup: false });
+    let yPositions = [3, part.height - 3];
+    if (hingeCount >= 3) yPositions.push(part.height / 2);
+    if (hingeCount >= 4) yPositions = [3, part.height * 0.33, part.height * 0.67, part.height - 3];
+    
+    const sides = hingeSide === 'both' ? ['left', 'right'] : [hingeSide];
+    
+    sides.forEach(side => {
+        yPositions.forEach(y => {
+            const cx = side === 'right' ? part.width - cupX : cupX;
+            const px = side === 'right' ? part.width - pilotX : pilotX;
+            holes.push({ x: cx, y, dia: cupD, color: '#dc2626', isCup: true });
+            holes.push({ x: px, y: y - zOff, dia: pilotD, color: '#22c55e', isCup: false });
+            holes.push({ x: px, y: y + zOff, dia: pilotD, color: '#22c55e', isCup: false });
+        });
     });
+    
     return holes;
 }
 
 function getDrawerHoles(part) {
-    const d = 5/25.4, i = 1.5;
+    const d = 5 / 25.4, m = 1.5;
     return [
-        { x: i, y: i, dia: d, color: '#d97706', isCup: false },
-        { x: part.width - i, y: i, dia: d, color: '#d97706', isCup: false },
-        { x: i, y: part.height - i, dia: d, color: '#d97706', isCup: false },
-        { x: part.width - i, y: part.height - i, dia: d, color: '#d97706', isCup: false }
+        { x: m, y: m, dia: d, color: '#f59e0b', isCup: false },
+        { x: part.width - m, y: m, dia: d, color: '#f59e0b', isCup: false },
+        { x: m, y: part.height - m, dia: d, color: '#f59e0b', isCup: false },
+        { x: part.width - m, y: part.height - m, dia: d, color: '#f59e0b', isCup: false }
     ];
 }
 
@@ -770,8 +742,8 @@ function toggleMeasure() {
     measureMode = !measureMode;
     measureStart = null;
     document.getElementById('btn-measure').classList.toggle('active', measureMode);
-    document.getElementById('btn-measure').textContent = measureMode ? 'Click Start' : 'Measure';
-    document.getElementById('measure-result').textContent = measureMode ? 'Click first point...' : 'Drag to pan • Scroll to zoom';
+    document.getElementById('btn-measure').textContent = measureMode ? '📏 Start Pt' : '📏 Measure';
+    document.getElementById('measure-result').textContent = measureMode ? 'Click first point on part...' : 'Drag to pan • Scroll to zoom';
     canvas.style.cursor = measureMode ? 'crosshair' : 'grab';
     updatePreview();
 }
@@ -782,16 +754,11 @@ function resetZoom() { zoomLevel = 1; panOffset = { x: 0, y: 0 }; updatePreview(
 
 // === FORMATTING ===
 function formatDimension(inches) {
-    if (inches === undefined || inches === null || isNaN(inches)) return '0';
-    
+    if (!inches || isNaN(inches)) return '0';
     switch (displayUnits) {
-        case 'metric':
-            return (inches * 25.4).toFixed(1) + 'mm';
-        case 'decimal':
-            return inches.toFixed(3).replace(/\.?0+$/, '') + '"';
-        case 'fraction':
-        default:
-            return formatFraction(inches);
+        case 'metric': return (inches * 25.4).toFixed(1) + 'mm';
+        case 'decimal': return inches.toFixed(3).replace(/\.?0+$/, '') + '"';
+        default: return formatFraction(inches);
     }
 }
 
@@ -806,45 +773,20 @@ function formatFraction(d) {
     return w ? `${w}-${best[1]}"` : `${best[1]}"`;
 }
 
-function parseFraction(s) {
-    if (!s) return 0;
-    s = String(s).replace(/"/g, '').trim();
-    if (s.includes('-')) { 
-        const parts = s.split('-'); 
-        return parseInt(parts[0]) + parseFraction(parts[1]); 
-    }
-    if (s.includes('/')) { 
-        const [n, d] = s.split('/'); 
-        return parseFloat(n) / parseFloat(d); 
-    }
-    return parseFloat(s) || 0;
-}
-
 function parseDimension(s) {
     if (!s) return 0;
     s = String(s).trim();
-    
-    // Metric (mm)
-    if (s.toLowerCase().includes('mm')) {
-        return parseFloat(s) / 25.4;
-    }
-    
-    // Remove inch symbol
-    s = s.replace(/"/g, '').trim();
-    
-    // Fraction (15-1/2)
+    if (s.toLowerCase().includes('mm')) return parseFloat(s) / 25.4;
+    s = s.replace(/"/g, '');
     if (s.includes('-') && s.includes('/')) {
-        const parts = s.split('-');
-        return parseInt(parts[0]) + parseFraction(parts[1]);
+        const [whole, frac] = s.split('-');
+        const [n, d] = frac.split('/');
+        return parseInt(whole) + parseFloat(n) / parseFloat(d);
     }
-    
-    // Just fraction (1/2)
     if (s.includes('/')) {
         const [n, d] = s.split('/');
         return parseFloat(n) / parseFloat(d);
     }
-    
-    // Decimal
     return parseFloat(s) || 0;
 }
 
@@ -856,19 +798,19 @@ function exportSelectedDXF() {
 
 function exportAllDXF() {
     const selected = parts.filter(p => p.selected !== false);
-    if (selected.length === 0) {
-        alert('No parts selected');
-        return;
-    }
+    if (!selected.length) { alert('No parts selected'); return; }
     generateDXF(selected);
 }
 
 function generateDXF(list) {
     const jobNum = document.getElementById('job-number').value || 'job';
+    const hingeCount = parseInt(document.getElementById('hinge-count')?.value || '2');
     
     list.forEach(part => {
+        const hingeSide = part.hingeSide || document.getElementById('hinge-side')?.value || 'left';
+        
         let dxf = '0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n';
-        ['Outline','Hinge_Cup_35mm','Hinge_Pilot_8mm','Drawer_5mm'].forEach(n => 
+        ['Outline', 'Hinge_Cup_35mm', 'Hinge_Pilot_8mm', 'Drawer_5mm'].forEach(n =>
             dxf += `0\nLAYER\n2\n${n}\n70\n0\n62\n7\n6\nCONTINUOUS\n`
         );
         dxf += '0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
@@ -878,17 +820,21 @@ function generateDXF(list) {
         dxf += `10\n0\n20\n0\n10\n${part.width}\n20\n0\n10\n${part.width}\n20\n${part.height}\n10\n0\n20\n${part.height}\n`;
         
         // Holes
-        (part.type === 'door' ? getHingeHoles(part) : getDrawerHoles(part)).forEach(h => {
+        const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : getDrawerHoles(part);
+        holes.forEach(h => {
             const layer = h.dia > 1 ? 'Hinge_Cup_35mm' : part.type === 'door' ? 'Hinge_Pilot_8mm' : 'Drawer_5mm';
-            dxf += `0\nCIRCLE\n8\n${layer}\n10\n${h.x.toFixed(4)}\n20\n${h.y.toFixed(4)}\n40\n${(h.dia/2).toFixed(4)}\n`;
+            dxf += `0\nCIRCLE\n8\n${layer}\n10\n${h.x.toFixed(4)}\n20\n${h.y.toFixed(4)}\n40\n${(h.dia / 2).toFixed(4)}\n`;
         });
         
         dxf += '0\nENDSEC\n0\nEOF\n';
         
-        const filename = `${jobNum}_${part.name.replace(/\s+/g, '_')}_${formatDimension(part.width)}x${formatDimension(part.height)}.dxf`.replace(/"/g, '').replace(/mm/g, '');
+        const side = hingeSide === 'both' ? 'LR' : hingeSide.charAt(0).toUpperCase();
+        const fn = `${jobNum}_${part.name}_${formatDimension(part.width)}x${formatDimension(part.height)}_${side}.dxf`
+            .replace(/["\s]+/g, '_').replace(/mm/g, '');
+        
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
-        a.download = filename;
+        a.download = fn;
         a.click();
     });
 }
