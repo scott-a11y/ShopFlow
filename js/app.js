@@ -1,5 +1,5 @@
 // ShopFlow - Cabinet CNC Configurator
-// FIXED: Pilot holes now at correct X position from database
+// Reads manufacturer specs from CabinetSense database
 
 let DB = null;
 let parts = [];
@@ -80,29 +80,46 @@ function handleWheel(e) {
 
 function handleMeasureClick(x, y) {
     const t = previewTransform;
+    if (!t.scale) return;
+    
     const partX = (x - t.offsetX - panOffset.x) / t.scale;
     const partY = t.partHeight - (y - t.offsetY - panOffset.y) / t.scale;
     
     if (!measureStart) {
-        measureStart = { x: partX, y: partY };
-        document.getElementById('btn-measure').textContent = 'Click End';
-        document.getElementById('measure-result').innerHTML = 'Click second point...';
+        measureStart = { x: partX, y: partY, screenX: x, screenY: y };
+        document.getElementById('btn-measure').textContent = 'Click End Point';
+        document.getElementById('measure-result').innerHTML = '<b>Start point set.</b> Click second point to measure.';
         updatePreview();
     } else {
         const dx = partX - measureStart.x;
         const dy = partY - measureStart.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         
-        document.getElementById('measure-result').innerHTML = 
-            `<b>Distance:</b> ${formatFraction(dist)} (${(dist * 25.4).toFixed(1)}mm) &nbsp;|&nbsp; ` +
-            `<b>X:</b> ${formatFraction(Math.abs(dx))} &nbsp;|&nbsp; <b>Y:</b> ${formatFraction(Math.abs(dy))}`;
+        // Store end point for drawing
+        measureStart.endX = partX;
+        measureStart.endY = partY;
+        measureStart.endScreenX = x;
+        measureStart.endScreenY = y;
+        measureStart.distance = dist;
+        measureStart.dx = dx;
+        measureStart.dy = dy;
         
-        measureStart = null;
-        measureMode = false;
-        document.getElementById('btn-measure').textContent = 'Measure';
-        document.getElementById('btn-measure').classList.remove('active');
-        canvas.style.cursor = 'grab';
+        document.getElementById('measure-result').innerHTML = 
+            `<b>Distance:</b> ${formatFraction(dist)} (${(dist * 25.4).toFixed(2)}mm) &nbsp;|&nbsp; ` +
+            `<b>ΔX:</b> ${formatFraction(Math.abs(dx))} (${(Math.abs(dx) * 25.4).toFixed(2)}mm) &nbsp;|&nbsp; ` +
+            `<b>ΔY:</b> ${formatFraction(Math.abs(dy))} (${(Math.abs(dy) * 25.4).toFixed(2)}mm)`;
+        
         updatePreview();
+        
+        // Reset after showing result
+        setTimeout(() => {
+            measureStart = null;
+            measureMode = false;
+            document.getElementById('btn-measure').textContent = 'Measure';
+            document.getElementById('btn-measure').classList.remove('active');
+            canvas.style.cursor = 'grab';
+            updatePreview();
+        }, 3000);
     }
 }
 
@@ -112,6 +129,10 @@ async function loadDatabase() {
         const data = await response.json();
         DB = data.tables;
         
+        console.log('Database loaded:', DB);
+        console.log('Parts:', DB.Part?.length);
+        console.log('Holes:', DB.Hole?.length);
+        
         document.getElementById('db-info').textContent = 
             `${DB.Hole?.length || 0} holes | ${DB.Part?.length || 0} parts`;
         document.getElementById('stat-holes').textContent = DB.Hole?.length || 0;
@@ -120,7 +141,7 @@ async function loadDatabase() {
         populateHingeTemplates();
     } catch (error) {
         console.error('Database error:', error);
-        document.getElementById('db-info').textContent = 'Error';
+        document.getElementById('db-info').textContent = 'Error loading DB';
     }
 }
 
@@ -133,40 +154,54 @@ function parseMM(str) {
     return isNaN(n) ? 0 : (n > 50 ? n / 25.4 : n);
 }
 
-// Get hole pattern from database - each hole has its own X position
 function getHingeHolePattern(oid) {
     if (!DB?.Hole) return null;
-    const holes = DB.Hole.filter(h => h.OIDPart === String(oid));
+    const holes = DB.Hole.filter(h => String(h.OIDPart) === String(oid));
     if (!holes.length) return null;
     
     return holes.map(h => ({
-        x: parseMM(h.XLocation),      // Each hole's X from edge
-        z: parseMM(h.ZLocation),      // Vertical offset from hinge center
+        x: parseMM(h.XLocation),
+        z: parseMM(h.ZLocation),
         dia: parseMM(h.Diameter),
         depth: parseMM(h.Depth)
     }));
 }
 
 function getHingeInfo(oid) {
-    return DB?.Part?.find(p => p.OID === String(oid));
+    if (!DB?.Part) return null;
+    return DB.Part.find(p => String(p.OID) === String(oid));
 }
 
 function populateHardwareLists() {
     const hingeList = document.getElementById('hinge-list');
-    const hinges = DB?.Part?.filter(p => p.Class === '28') || [];
+    
+    // Get all door hinges (Class 28)
+    const hinges = DB?.Part?.filter(p => String(p.Class) === '28') || [];
+    console.log('Found hinges:', hinges.length, hinges.map(h => h.Name));
+    
+    if (hinges.length === 0) {
+        hingeList.innerHTML = '<div style="padding:10px;color:#666;">No hinges found</div>';
+        return;
+    }
     
     hingeList.innerHTML = hinges.map(h => {
         const pattern = getHingeHolePattern(h.OID);
-        return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge(${h.OID})">
-            <div class="name">${h.Name}</div>
-            <div class="details">${pattern?.length || 0} holes</div>
+        const holeCount = pattern ? pattern.length : 0;
+        return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
+            <div class="name">${h.Name || 'Unnamed'}</div>
+            <div class="details">${holeCount} holes | Depth: ${pattern?.[0]?.depth ? (pattern[0].depth * 25.4).toFixed(1) + 'mm' : '?'}</div>
         </div>`;
     }).join('');
     
-    if (hinges.length) selectHinge(parseInt(hinges[0].OID));
+    // Auto-select first hinge
+    if (hinges.length > 0) {
+        selectHinge(hinges[0].OID);
+    }
     
+    // Slides
     const slideList = document.getElementById('slide-list');
-    slideList.innerHTML = (DB?.SlideSystems || []).map(s => 
+    const slides = DB?.SlideSystems || [];
+    slideList.innerHTML = slides.map(s => 
         `<div class="hardware-item" data-oid="${s.OID}">
             <div class="name">${s.Name || 'Slide ' + s.OID}</div>
         </div>`
@@ -174,10 +209,13 @@ function populateHardwareLists() {
 }
 
 function selectHinge(oid) {
-    selectedHingeOID = oid;
+    selectedHingeOID = String(oid);
+    console.log('Selected hinge:', selectedHingeOID);
+    
     document.querySelectorAll('#hinge-list .hardware-item').forEach(el => {
-        el.classList.toggle('selected', el.dataset.oid == oid);
+        el.classList.toggle('selected', String(el.dataset.oid) === selectedHingeOID);
     });
+    
     updatePreview();
 }
 
@@ -187,17 +225,26 @@ function populateHingeTemplates() {
     
     select.innerHTML = DB.Hinging.map(h => {
         const hinge = getHingeInfo(h.HingeOID);
-        return `<option value="${h.OID}">${h.Template} - ${hinge?.Name || '?'}</option>`;
+        return `<option value="${h.OID}" data-hinge-oid="${h.HingeOID}">${h.Template} - ${hinge?.Name || 'Unknown'}</option>`;
     }).join('');
+    
+    select.addEventListener('change', updateHingeTemplate);
     updateHingeTemplate();
 }
 
 function updateHingeTemplate() {
-    const template = DB?.Hinging?.find(h => h.OID == document.getElementById('hinge-template')?.value);
+    const select = document.getElementById('hinge-template');
+    const selectedOption = select.options[select.selectedIndex];
+    const template = DB?.Hinging?.find(h => String(h.OID) === select.value);
+    
     if (template) {
         document.getElementById('bottom-hinge').textContent = template.BottomHinge;
         document.getElementById('top-hinge').textContent = template.TopHinge;
-        if (template.HingeOID) selectHinge(parseInt(template.HingeOID));
+        
+        // Also select the associated hinge
+        if (selectedOption?.dataset?.hingeOid) {
+            selectHinge(selectedOption.dataset.hingeOid);
+        }
     }
 }
 
@@ -286,7 +333,7 @@ function updatePreview() {
     
     if (!part) return;
     
-    const pad = 50;
+    const pad = 80;
     const baseScale = Math.min((canvas.width - pad*2) / part.width, (canvas.height - pad*2) / part.height);
     const scale = baseScale * zoomLevel;
     const W = part.width * scale;
@@ -303,59 +350,15 @@ function updatePreview() {
     for (let x = ox % gs; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
     for (let y = oy % gs; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
     
-    // Part
+    // Part background
     ctx.fillStyle = '#1e293b';
     ctx.fillRect(ox, oy, W, H);
     ctx.strokeStyle = '#3b82f6';
     ctx.lineWidth = 2;
     ctx.strokeRect(ox, oy, W, H);
     
-    // Holes - now with CORRECT positions from database
+    // Get holes from database
     const holes = part.type === 'door' ? getHingeHoles(part) : getDrawerHoles(part);
-    
-    // Draw dimension lines from cup to pilots (manufacturer spec visualization)
-    if (showDimensions && part.type === 'door') {
-        const bottomHoles = holes.filter(h => h.y < part.height / 2);
-        const cup = bottomHoles.find(h => h.isCup);
-        const pilots = bottomHoles.filter(h => !h.isCup);
-        
-        if (cup && pilots.length) {
-            const cupX = ox + cup.x * scale;
-            const cupY = oy + (part.height - cup.y) * scale;
-            
-            ctx.setLineDash([4, 4]);
-            ctx.strokeStyle = '#22d3ee';
-            ctx.lineWidth = 1;
-            
-            pilots.forEach(pilot => {
-                const pilotX = ox + pilot.x * scale;
-                const pilotY = oy + (part.height - pilot.y) * scale;
-                
-                // Line from cup center to pilot
-                ctx.beginPath();
-                ctx.moveTo(cupX, cupY);
-                ctx.lineTo(pilotX, pilotY);
-                ctx.stroke();
-            });
-            
-            ctx.setLineDash([]);
-            
-            // X offset dimension line
-            if (pilots[0]) {
-                const pilotX = ox + pilots[0].x * scale;
-                ctx.strokeStyle = '#22d3ee';
-                ctx.beginPath();
-                ctx.moveTo(cupX, cupY + 30);
-                ctx.lineTo(pilotX, cupY + 30);
-                ctx.stroke();
-                
-                ctx.fillStyle = '#22d3ee';
-                ctx.font = '9px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(Math.abs(pilots[0].xOffsetFromCup).toFixed(1) + 'mm', (cupX + pilotX) / 2, cupY + 42);
-            }
-        }
-    }
     
     // Draw holes
     holes.forEach(h => {
@@ -368,98 +371,183 @@ function updatePreview() {
         ctx.fillStyle = h.color;
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Show diameter in hole
-        if (showDimensions && r > 8) {
+        // Diameter label
+        if (r > 10) {
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 9px sans-serif';
+            ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(Math.round(h.dia * 25.4) + '', hx, hy);
         }
     });
     
-    // Dimensions
-    if (showDimensions) {
-        ctx.fillStyle = '#fff';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(formatFraction(part.width), ox + W/2, oy - 15);
+    // Dimension annotations
+    if (showDimensions && part.type === 'door' && holes.length) {
+        const cup = holes.find(h => h.isCup);
+        const pilot = holes.find(h => !h.isCup);
         
-        ctx.save();
-        ctx.translate(ox - 15, oy + H/2);
-        ctx.rotate(-Math.PI/2);
-        ctx.fillText(formatFraction(part.height), 0, 0);
-        ctx.restore();
-        
-        // Manufacturer spec callouts
-        if (part.type === 'door' && holes.length) {
-            const cup = holes.find(h => h.isCup);
-            const pilot = holes.find(h => !h.isCup && h.dia > 0.2);
+        if (cup) {
+            const cupX = ox + cup.x * scale;
+            const cupY = oy + (part.height - cup.y) * scale;
             
+            // Cup setback from edge
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]);
+            
+            // Horizontal line from edge to cup
+            ctx.beginPath();
+            ctx.moveTo(ox, cupY);
+            ctx.lineTo(cupX, cupY);
+            ctx.stroke();
+            
+            // Dimension text
             ctx.fillStyle = '#22d3ee';
-            ctx.font = '10px sans-serif';
-            ctx.textAlign = 'left';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText((cup.x * 25.4).toFixed(1) + 'mm', (ox + cupX) / 2, cupY - 8);
             
-            if (cup) {
-                // Cup setback from edge
-                ctx.fillText('Cup from edge: ' + cup.cupSetback.toFixed(1) + 'mm', ox + 10, oy + H + 18);
-            }
-            if (pilot && cup) {
-                // Pilot offset FROM CUP CENTER (manufacturer spec)
-                ctx.fillText('Pilot from cup: X=' + pilot.xOffsetFromCup.toFixed(1) + 'mm, Y=±' + Math.abs(pilot.zOffsetFromCup).toFixed(1) + 'mm', ox + 10, oy + H + 32);
+            // Pilot offset from cup
+            if (pilot) {
+                const pilotX = ox + pilot.x * scale;
+                const pilotY = oy + (part.height - pilot.y) * scale;
+                
+                // Dashed line from cup to pilot
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(cupX, cupY);
+                ctx.lineTo(pilotX, pilotY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                // X offset dimension
+                ctx.beginPath();
+                ctx.moveTo(cupX, cupY + 25);
+                ctx.lineTo(pilotX, cupY + 25);
+                ctx.stroke();
+                ctx.fillText((pilot.xOffset * 25.4).toFixed(1) + 'mm', (cupX + pilotX) / 2, cupY + 38);
+                
+                // Y offset dimension
+                ctx.beginPath();
+                ctx.moveTo(pilotX + 20, cupY);
+                ctx.lineTo(pilotX + 20, pilotY);
+                ctx.stroke();
+                ctx.save();
+                ctx.translate(pilotX + 32, (cupY + pilotY) / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillText((Math.abs(pilot.zOffset) * 25.4).toFixed(1) + 'mm', 0, 0);
+                ctx.restore();
             }
         }
     }
     
-    // Legend
-    ctx.fillStyle = 'rgba(15,23,42,0.95)';
-    ctx.fillRect(0, canvas.height - 35, canvas.width, 35);
+    // Part dimensions
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.setLineDash([]);
+    ctx.fillText(formatFraction(part.width), ox + W/2, oy - 20);
     
-    const info = selectedHingeOID ? getHingeInfo(selectedHingeOID) : null;
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(info?.Name || 'No hinge selected', 10, canvas.height - 18);
+    ctx.save();
+    ctx.translate(ox - 20, oy + H/2);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText(formatFraction(part.height), 0, 0);
+    ctx.restore();
     
-    // Legend dots
-    ctx.beginPath(); ctx.arc(200, canvas.height - 18, 5, 0, Math.PI*2); ctx.fillStyle = '#dc2626'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.fillText('35mm Cup', 210, canvas.height - 18);
-    
-    ctx.beginPath(); ctx.arc(290, canvas.height - 18, 4, 0, Math.PI*2); ctx.fillStyle = '#16a34a'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.fillText('8mm Pilot', 298, canvas.height - 18);
-    
-    ctx.beginPath(); ctx.arc(375, canvas.height - 18, 4, 0, Math.PI*2); ctx.fillStyle = '#d97706'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.fillText('Drawer', 383, canvas.height - 18);
-    
-    ctx.textAlign = 'right';
-    ctx.fillText(Math.round(zoomLevel * 100) + '%', canvas.width - 10, canvas.height - 18);
-    
-    // Measure marker
+    // Measure tool visualization
     if (measureStart) {
-        const mx = ox + measureStart.x * scale;
-        const my = oy + (part.height - measureStart.y) * scale;
+        const startX = ox + measureStart.x * scale;
+        const startY = oy + (part.height - measureStart.y) * scale;
+        
+        // Start point
         ctx.beginPath();
-        ctx.arc(mx, my, 6, 0, Math.PI * 2);
+        ctx.arc(startX, startY, 8, 0, Math.PI * 2);
         ctx.fillStyle = '#22d3ee';
         ctx.fill();
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('1', startX, startY + 4);
+        
+        // End point and line (if second click made)
+        if (measureStart.endX !== undefined) {
+            const endX = ox + measureStart.endX * scale;
+            const endY = oy + (part.height - measureStart.endY) * scale;
+            
+            // Line
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // End point
+            ctx.beginPath();
+            ctx.arc(endX, endY, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#22d3ee';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#fff';
+            ctx.fillText('2', endX, endY + 4);
+            
+            // Distance label at midpoint
+            const midX = (startX + endX) / 2;
+            const midY = (startY + endY) / 2;
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(midX - 40, midY - 12, 80, 24);
+            ctx.fillStyle = '#22d3ee';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillText((measureStart.distance * 25.4).toFixed(2) + 'mm', midX, midY + 4);
+        }
     }
+    
+    // Legend bar
+    ctx.fillStyle = 'rgba(15,23,42,0.95)';
+    ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+    
+    const info = selectedHingeOID ? getHingeInfo(selectedHingeOID) : null;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(info?.Name || 'Select a hinge', 10, canvas.height - 22);
+    
+    // Legend
+    const lx = 220;
+    ctx.beginPath(); ctx.arc(lx, canvas.height - 22, 6, 0, Math.PI*2); ctx.fillStyle = '#dc2626'; ctx.fill();
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif';
+    ctx.fillText('Cup (35mm)', lx + 12, canvas.height - 22);
+    
+    ctx.beginPath(); ctx.arc(lx + 100, canvas.height - 22, 5, 0, Math.PI*2); ctx.fillStyle = '#16a34a'; ctx.fill();
+    ctx.fillText('Pilot (8mm)', lx + 112, canvas.height - 22);
+    
+    ctx.textAlign = 'right';
+    ctx.fillText('Zoom: ' + Math.round(zoomLevel * 100) + '%', canvas.width - 10, canvas.height - 22);
 }
 
-// Get hinge holes with manufacturer specs relative to cup center
 function getHingeHoles(part) {
     const holes = [];
-    const template = DB?.Hinging?.find(h => h.OID == document.getElementById('hinge-template')?.value);
-    const oid = selectedHingeOID || (template?.HingeOID ? parseInt(template.HingeOID) : 73);
+    const template = DB?.Hinging?.find(h => String(h.OID) === document.getElementById('hinge-template')?.value);
+    const oid = selectedHingeOID || (template?.HingeOID ? String(template.HingeOID) : '73');
     const pattern = getHingeHolePattern(oid);
     
-    if (!pattern?.length) return getHingeHolesFallback(part);
+    console.log('Getting holes for hinge OID:', oid, 'Pattern:', pattern);
+    
+    if (!pattern?.length) {
+        console.log('No pattern found, using fallback');
+        return getHingeHolesFallback(part);
+    }
     
     // Get Y positions from template
     let bottomY = 3, topY = part.height - 3;
@@ -470,18 +558,13 @@ function getHingeHoles(part) {
         topY = part.height - (parseMM(tv) || 3);
     }
     
-    // Find cup hole to calculate relative positions
+    // Find cup to calculate relative positions
     const cupHole = pattern.find(h => h.dia > 1);
     const cupX = cupHole ? cupHole.x : pattern[0].x;
     
-    // Add holes at both hinge positions
     [bottomY, topY].forEach(hingeY => {
         pattern.forEach(h => {
             const isCup = h.dia > 1;
-            // Calculate offset from cup center for display
-            const xOffsetFromCup = (h.x - cupX) * 25.4; // in mm
-            const zOffsetFromCup = h.z * 25.4; // in mm
-            
             holes.push({
                 x: h.x,
                 y: hingeY + h.z,
@@ -489,10 +572,9 @@ function getHingeHoles(part) {
                 depth: h.depth,
                 color: isCup ? '#dc2626' : '#16a34a',
                 isCup: isCup,
-                // Manufacturer spec: offset from cup center
-                xOffsetFromCup: xOffsetFromCup,
-                zOffsetFromCup: zOffsetFromCup,
-                cupSetback: cupX * 25.4 // Cup distance from edge in mm
+                xOffset: h.x - cupX,
+                zOffset: h.z,
+                cupSetback: cupX
             });
         });
     });
@@ -501,26 +583,14 @@ function getHingeHoles(part) {
 }
 
 function getHingeHolesFallback(part) {
-    const holes = [];
-    // Blum specs: Cup at 22.5mm, Pilots at 32mm (9.5mm from cup), Z offset ±22.5mm
     const cupX = 22.5/25.4, pilotX = 32/25.4, zOff = 22.5/25.4;
     const cupD = 35/25.4, pilotD = 8/25.4;
-    const xOffset = (pilotX - cupX) * 25.4; // 9.5mm
-    const zOffMM = zOff * 25.4; // 22.5mm
+    const holes = [];
     
     [3, part.height - 3].forEach(y => {
-        holes.push({ 
-            x: cupX, y, dia: cupD, color: '#dc2626', 
-            isCup: true, xOffsetFromCup: 0, zOffsetFromCup: 0, cupSetback: 22.5 
-        });
-        holes.push({ 
-            x: pilotX, y: y - zOff, dia: pilotD, color: '#16a34a',
-            isCup: false, xOffsetFromCup: xOffset, zOffsetFromCup: -zOffMM, cupSetback: 22.5
-        });
-        holes.push({ 
-            x: pilotX, y: y + zOff, dia: pilotD, color: '#16a34a',
-            isCup: false, xOffsetFromCup: xOffset, zOffsetFromCup: zOffMM, cupSetback: 22.5
-        });
+        holes.push({ x: cupX, y, dia: cupD, color: '#dc2626', isCup: true, xOffset: 0, zOffset: 0, cupSetback: cupX });
+        holes.push({ x: pilotX, y: y - zOff, dia: pilotD, color: '#16a34a', isCup: false, xOffset: pilotX - cupX, zOffset: -zOff, cupSetback: cupX });
+        holes.push({ x: pilotX, y: y + zOff, dia: pilotD, color: '#16a34a', isCup: false, xOffset: pilotX - cupX, zOffset: zOff, cupSetback: cupX });
     });
     return holes;
 }
@@ -528,10 +598,10 @@ function getHingeHolesFallback(part) {
 function getDrawerHoles(part) {
     const d = 5/25.4, i = 1.5;
     return [
-        { x: i, y: i, dia: d, color: '#d97706' },
-        { x: part.width - i, y: i, dia: d, color: '#d97706' },
-        { x: i, y: part.height - i, dia: d, color: '#d97706' },
-        { x: part.width - i, y: part.height - i, dia: d, color: '#d97706' }
+        { x: i, y: i, dia: d, color: '#d97706', isCup: false },
+        { x: part.width - i, y: i, dia: d, color: '#d97706', isCup: false },
+        { x: i, y: part.height - i, dia: d, color: '#d97706', isCup: false },
+        { x: part.width - i, y: part.height - i, dia: d, color: '#d97706', isCup: false }
     ];
 }
 
@@ -545,9 +615,10 @@ function toggleMeasure() {
     measureMode = !measureMode;
     measureStart = null;
     document.getElementById('btn-measure').classList.toggle('active', measureMode);
-    document.getElementById('btn-measure').textContent = measureMode ? 'Click Start' : 'Measure';
-    document.getElementById('measure-result').textContent = measureMode ? 'Click first point...' : 'Drag to pan, scroll to zoom';
+    document.getElementById('btn-measure').textContent = measureMode ? 'Click Start Point' : 'Measure';
+    document.getElementById('measure-result').textContent = measureMode ? 'Click first point on the part...' : 'Drag to pan, scroll to zoom';
     canvas.style.cursor = measureMode ? 'crosshair' : 'grab';
+    updatePreview();
 }
 
 function zoomIn() { zoomLevel = Math.min(zoomLevel * 1.25, 5); updatePreview(); }
