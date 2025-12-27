@@ -83,8 +83,50 @@ function doMeasure(x, y) {
     if (!t.scale) return;
     
     // Convert screen coords to part coords
-    const px = (x - t.ox) / t.scale;
-    const py = t.ph - (y - t.oy) / t.scale;
+    let px = (x - t.ox) / t.scale;
+    let py = t.ph - (y - t.oy) / t.scale;
+    
+    // Get current part and holes
+    const part = parts.find(p => p.id == document.getElementById('preview-select').value);
+    if (part) {
+        const hingeSide = part.hingeSide || document.getElementById('hinge-side').value;
+        const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
+        const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
+        
+        // Find nearest hole center
+        let nearestDist = Infinity;
+        let nearestHole = null;
+        const snapRadius = 1.5; // inches - snap if within 1.5" of hole center
+        
+        holes.forEach(h => {
+            const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
+            if (dist < nearestDist && dist < snapRadius) {
+                nearestDist = dist;
+                nearestHole = h;
+            }
+        });
+        
+        // Also check corners
+        const corners = [
+            { x: 0, y: 0, name: 'Bottom-Left' },
+            { x: part.width, y: 0, name: 'Bottom-Right' },
+            { x: 0, y: part.height, name: 'Top-Left' },
+            { x: part.width, y: part.height, name: 'Top-Right' }
+        ];
+        corners.forEach(c => {
+            const dist = Math.sqrt(Math.pow(px - c.x, 2) + Math.pow(py - c.y, 2));
+            if (dist < nearestDist && dist < snapRadius) {
+                nearestDist = dist;
+                nearestHole = c;
+            }
+        });
+        
+        // Snap to hole/corner center if found
+        if (nearestHole) {
+            px = nearestHole.x;
+            py = nearestHole.y;
+        }
+    }
     
     if (!measureStart) {
         measureStart = { x: px, y: py, sx: x, sy: y };
