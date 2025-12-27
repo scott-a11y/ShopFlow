@@ -828,25 +828,71 @@ function exportDXF(list) {
         const hingeSide = part.hingeSide || 'left';
         const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
         
+        // Layer names for Aspire toolpath templates
+        // Drill_35 = 35mm cup boring, Drill_8 = 8mm pilot holes
+        const layers = ['Outline', 'Drill_35', 'Drill_8', 'Labels'];
+        
         let dxf = '0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n';
-        ['Outline', 'Cup_35mm', 'Pilot_8mm'].forEach(n => {
+        layers.forEach(n => {
             dxf += '0\nLAYER\n2\n' + n + '\n70\n0\n62\n7\n6\nCONTINUOUS\n';
         });
         dxf += '0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
         
-        // Outline
+        // Outline (closed polyline)
         dxf += '0\nLWPOLYLINE\n8\nOutline\n90\n4\n70\n1\n';
-        dxf += '10\n0\n20\n0\n10\n' + part.width + '\n20\n0\n10\n' + part.width + '\n20\n' + part.height + '\n10\n0\n20\n' + part.height + '\n';
+        dxf += '10\n0\n20\n0\n';
+        dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
+        dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
+        dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
         
-        // Holes
+        // Holes - use Drill_35 for cups, Drill_8 for pilots
         holes.forEach(h => {
-            const layer = h.isCup ? 'Cup_35mm' : 'Pilot_8mm';
-            dxf += '0\nCIRCLE\n8\n' + layer + '\n10\n' + h.x.toFixed(4) + '\n20\n' + h.y.toFixed(4) + '\n40\n' + (h.dia/2).toFixed(4) + '\n';
+            const layer = h.isCup ? 'Drill_35' : 'Drill_8';
+            const radius = (h.dia / 2).toFixed(4);
+            dxf += '0\nCIRCLE\n8\n' + layer + '\n';
+            dxf += '10\n' + h.x.toFixed(4) + '\n';
+            dxf += '20\n' + h.y.toFixed(4) + '\n';
+            dxf += '40\n' + radius + '\n';
         });
+        
+        // Part label - TEXT entity
+        const labelX = part.width / 2;
+        const labelY = part.height / 2;
+        const labelText = part.name;
+        dxf += '0\nTEXT\n8\nLabels\n';
+        dxf += '10\n' + labelX.toFixed(4) + '\n';
+        dxf += '20\n' + labelY.toFixed(4) + '\n';
+        dxf += '40\n0.5\n';  // Text height (0.5 inches)
+        dxf += '1\n' + labelText + '\n';
+        dxf += '72\n1\n';  // Horizontal center
+        dxf += '11\n' + labelX.toFixed(4) + '\n';  // Alignment point
+        dxf += '21\n' + labelY.toFixed(4) + '\n';
+        dxf += '73\n2\n';  // Vertical center
+        
+        // Dimension labels
+        // Width label (bottom)
+        const widthLabel = (part.width * 25.4).toFixed(1) + 'mm';
+        dxf += '0\nTEXT\n8\nLabels\n';
+        dxf += '10\n' + (part.width / 2).toFixed(4) + '\n';
+        dxf += '20\n-0.3\n';
+        dxf += '40\n0.2\n';
+        dxf += '1\n' + widthLabel + '\n';
+        dxf += '72\n1\n11\n' + (part.width / 2).toFixed(4) + '\n21\n-0.3\n73\n2\n';
+        
+        // Height label (left side)
+        const heightLabel = (part.height * 25.4).toFixed(1) + 'mm';
+        dxf += '0\nTEXT\n8\nLabels\n';
+        dxf += '10\n-0.3\n';
+        dxf += '20\n' + (part.height / 2).toFixed(4) + '\n';
+        dxf += '40\n0.2\n';
+        dxf += '50\n90\n';  // Rotation 90 degrees
+        dxf += '1\n' + heightLabel + '\n';
         
         dxf += '0\nENDSEC\n0\nEOF\n';
         
-        const fn = job + '_' + part.name + '_' + Math.round(part.width) + 'x' + Math.round(part.height) + '.dxf';
+        // Filename with hinge side indicator
+        const sideCode = hingeSide === 'left' ? 'L' : hingeSide === 'right' ? 'R' : hingeSide === 'both' ? 'LR' : hingeSide.charAt(0).toUpperCase();
+        const fn = job + '_' + part.name + '_' + sideCode + '_' + Math.round(part.width) + 'x' + Math.round(part.height) + '.dxf';
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
         a.download = fn.replace(/\s+/g, '_');
