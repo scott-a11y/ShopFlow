@@ -1,5 +1,5 @@
 // ShopFlow - Cabinet CNC Configurator
-// Uses Canvas for reliable preview and measurement
+// Canvas with pan/zoom controls
 
 let DB = null;
 let parts = [];
@@ -9,6 +9,12 @@ let measureMode = false;
 let measureStart = null;
 let selectedHingeOID = null;
 let canvas, ctx;
+
+// Pan state
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+let panOffset = { x: 0, y: 0 };
+
 let previewTransform = { scale: 1, offsetX: 0, offsetY: 0, partWidth: 0, partHeight: 0 };
 
 // Initialize
@@ -16,12 +22,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     canvas = document.getElementById('preview');
     ctx = canvas.getContext('2d');
     
-    // Set canvas size
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
-    // Canvas click handler for measure tool
-    canvas.addEventListener('click', handleCanvasClick);
+    // Mouse events for pan and measure
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('mouseleave', handleMouseUp);
+    canvas.addEventListener('wheel', handleWheel);
     
     await loadDatabase();
     initUI();
@@ -33,6 +42,74 @@ function resizeCanvas() {
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
     updatePreview();
+}
+
+// Mouse handlers
+function handleMouseDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    if (measureMode) {
+        handleMeasureClick(x, y);
+    } else {
+        // Start panning
+        isPanning = true;
+        panStart = { x: x - panOffset.x, y: y - panOffset.y };
+        canvas.style.cursor = 'grabbing';
+    }
+}
+
+function handleMouseMove(e) {
+    if (!isPanning) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    panOffset = { x: x - panStart.x, y: y - panStart.y };
+    updatePreview();
+}
+
+function handleMouseUp() {
+    isPanning = false;
+    canvas.style.cursor = measureMode ? 'crosshair' : 'grab';
+}
+
+function handleWheel(e) {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    zoomLevel = Math.max(0.25, Math.min(5, zoomLevel * delta));
+    updatePreview();
+}
+
+function handleMeasureClick(x, y) {
+    // Convert screen to part coordinates
+    const partX = (x - previewTransform.offsetX - panOffset.x) / previewTransform.scale;
+    const partY = previewTransform.partHeight - (y - previewTransform.offsetY - panOffset.y) / previewTransform.scale;
+    
+    if (!measureStart) {
+        measureStart = { x: partX, y: partY, screenX: x, screenY: y };
+        document.getElementById('btn-measure').textContent = 'Click End';
+        document.getElementById('measure-result').textContent = 'Click second point...';
+        updatePreview();
+    } else {
+        const dx = partX - measureStart.x;
+        const dy = partY - measureStart.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        document.getElementById('measure-result').innerHTML = 
+            `<strong>Distance:</strong> ${formatFraction(dist)} (${formatMM(dist)}) | ` +
+            `<strong>ΔX:</strong> ${formatFraction(Math.abs(dx))} | ` +
+            `<strong>ΔY:</strong> ${formatFraction(Math.abs(dy))}`;
+        
+        measureStart = null;
+        measureMode = false;
+        document.getElementById('btn-measure').textContent = 'Measure';
+        document.getElementById('btn-measure').classList.remove('active');
+        canvas.style.cursor = 'grab';
+        updatePreview();
+    }
 }
 
 // Load database
@@ -55,29 +132,21 @@ async function loadDatabase() {
     }
 }
 
-// Parse measurement (handles "22.5mm", "3\"", etc.)
 function parseMeasurement(str) {
     if (!str || str === '') return 0;
     str = String(str).trim();
     str = str.replace(/\+?\[.*?\]/g, '').trim();
-    
-    if (str.includes('mm')) {
-        return parseFloat(str.replace('mm', '')) / 25.4;
-    }
-    if (str.includes('"')) {
-        return parseFloat(str.replace('"', ''));
-    }
+    if (str.includes('mm')) return parseFloat(str.replace('mm', '')) / 25.4;
+    if (str.includes('"')) return parseFloat(str.replace('"', ''));
     const num = parseFloat(str);
     if (isNaN(num)) return 0;
     return num > 50 ? num / 25.4 : num;
 }
 
-// Get hole pattern for hinge from database
 function getHingeHolePattern(hingeOID) {
     if (!DB || !DB.Hole) return null;
     const holes = DB.Hole.filter(h => h.OIDPart === String(hingeOID));
     if (holes.length === 0) return null;
-    
     return holes.map(h => ({
         xLocation: parseMeasurement(h.XLocation),
         zLocation: parseMeasurement(h.ZLocation),
@@ -91,7 +160,6 @@ function getHingeInfo(hingeOID) {
     return DB.Part.find(p => p.OID === String(hingeOID));
 }
 
-// Populate hardware lists
 function populateHardwareLists() {
     const hingeList = document.getElementById('hinge-list');
     if (DB.Part) {
@@ -104,7 +172,6 @@ function populateHardwareLists() {
                 <div class="details">${count} holes | OID: ${h.OID}</div>
             </div>`;
         }).join('');
-        
         if (hinges.length > 0) selectHinge(parseInt(hinges[0].OID));
     }
     
@@ -176,6 +243,7 @@ function initUI() {
             document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
         };
     });
+    canvas.style.cursor = 'grab';
 }
 
 function filterHardware(type) {
@@ -186,7 +254,6 @@ function filterHardware(type) {
     });
 }
 
-// Parts management
 function loadSampleParts() {
     parts = [
         { id: 1, name: 'Upper Left Door', width: 15.5, height: 30, type: 'door' },
@@ -247,7 +314,7 @@ function populatePreviewSelect() {
     ).join('');
 }
 
-// Canvas Preview
+// Canvas Preview with pan support
 function updatePreview() {
     if (!ctx) return;
     
@@ -266,137 +333,190 @@ function updatePreview() {
         return;
     }
     
-    const padding = 80;
-    const scaleX = (canvas.width - padding * 2) / part.width;
-    const scaleY = (canvas.height - padding * 2) / part.height;
-    const scale = Math.min(scaleX, scaleY) * zoomLevel;
+    // Calculate scale to fit part with padding
+    const padding = 60;
+    const availW = canvas.width - padding * 2;
+    const availH = canvas.height - padding * 2;
+    const baseScale = Math.min(availW / part.width, availH / part.height);
+    const scale = baseScale * zoomLevel;
     
     const partW = part.width * scale;
     const partH = part.height * scale;
-    const offsetX = (canvas.width - partW) / 2;
-    const offsetY = (canvas.height - partH) / 2;
     
-    previewTransform = { scale, offsetX, offsetY, partWidth: part.width, partHeight: part.height };
+    // Center offset plus pan
+    const centerX = (canvas.width - partW) / 2 + panOffset.x;
+    const centerY = (canvas.height - partH) / 2 + panOffset.y;
     
-    // Draw grid
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 0.5;
-    for (let x = 0; x <= part.width; x++) {
-        const px = offsetX + x * scale;
+    previewTransform = { 
+        scale, 
+        offsetX: centerX - panOffset.x, 
+        offsetY: centerY - panOffset.y, 
+        partWidth: part.width, 
+        partHeight: part.height 
+    };
+    
+    // Draw infinite grid background
+    ctx.save();
+    ctx.strokeStyle = '#1e3a5f';
+    ctx.lineWidth = 1;
+    const gridSize = scale; // 1 inch grid
+    const startX = centerX % gridSize;
+    const startY = centerY % gridSize;
+    
+    for (let x = startX; x < canvas.width; x += gridSize) {
         ctx.beginPath();
-        ctx.moveTo(px, offsetY);
-        ctx.lineTo(px, offsetY + partH);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
         ctx.stroke();
     }
-    for (let y = 0; y <= part.height; y++) {
-        const py = offsetY + (part.height - y) * scale;
+    for (let y = startY; y < canvas.height; y += gridSize) {
         ctx.beginPath();
-        ctx.moveTo(offsetX, py);
-        ctx.lineTo(offsetX + partW, py);
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
         ctx.stroke();
     }
+    ctx.restore();
+    
+    // Draw part background
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(centerX, centerY, partW, partH);
     
     // Draw part outline
     ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(offsetX, offsetY, partW, partH);
+    ctx.lineWidth = 3;
+    ctx.strokeRect(centerX, centerY, partW, partH);
     
     // Get holes
     const holes = part.type === 'door' ? getHingeHolesFromDB(part) : getDrawerHoles(part);
     
     // Draw holes
     holes.forEach(hole => {
-        const hx = offsetX + hole.x * scale;
-        const hy = offsetY + (part.height - hole.y) * scale;
-        const radius = Math.max(hole.diameter / 2 * scale, 4);
+        const hx = centerX + hole.x * scale;
+        const hy = centerY + (part.height - hole.y) * scale;
+        const radius = Math.max(hole.diameter / 2 * scale, 5);
         
+        // Outer ring
+        ctx.beginPath();
+        ctx.arc(hx, hy, radius + 2, 0, Math.PI * 2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Fill
         ctx.beginPath();
         ctx.arc(hx, hy, radius, 0, Math.PI * 2);
         ctx.fillStyle = hole.color;
         ctx.fill();
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 1;
-        ctx.stroke();
         
-        // Hole label
-        if (showDimensions && hole.diameter > 0.5) {
+        // Label
+        if (showDimensions && radius > 10) {
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 9px sans-serif';
+            ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText((hole.diameter * 25.4).toFixed(0) + 'mm', hx, hy + 3);
+            ctx.textBaseline = 'middle';
+            ctx.fillText((hole.diameter * 25.4).toFixed(0) + 'mm', hx, hy);
         }
     });
     
-    // Dimensions
+    // Dimension annotations
     if (showDimensions) {
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
         
-        // Width (top)
-        ctx.fillText(formatFraction(part.width), offsetX + partW/2, offsetY - 20);
-        drawDimLine(offsetX, offsetY - 10, offsetX + partW, offsetY - 10);
+        // Width dimension (top)
+        const dimY = centerY - 25;
+        ctx.fillText(formatFraction(part.width), centerX + partW/2, dimY);
+        drawArrowLine(centerX, dimY, centerX + partW, dimY);
         
-        // Height (left)
+        // Height dimension (left)
+        const dimX = centerX - 25;
         ctx.save();
-        ctx.translate(offsetX - 20, offsetY + partH/2);
+        ctx.translate(dimX, centerY + partH/2);
         ctx.rotate(-Math.PI/2);
         ctx.fillText(formatFraction(part.height), 0, 0);
         ctx.restore();
-        drawDimLine(offsetX - 10, offsetY, offsetX - 10, offsetY + partH);
+        drawArrowLine(dimX, centerY, dimX, centerY + partH);
         
-        // Hole positions
-        if (holes.length > 0 && part.type === 'door') {
+        // Hole position callouts
+        if (part.type === 'door' && holes.length > 0) {
             const cup = holes.find(h => h.diameter > 1);
             if (cup) {
                 ctx.fillStyle = '#22d3ee';
-                ctx.font = '10px sans-serif';
+                ctx.font = '12px sans-serif';
                 
                 // Edge setback
-                const setbackPx = cup.x * scale;
-                ctx.fillText(formatMM(cup.x), offsetX + setbackPx/2, offsetY + partH + 25);
+                const setbackX = centerX + cup.x * scale;
                 ctx.beginPath();
-                ctx.moveTo(offsetX, offsetY + partH + 15);
-                ctx.lineTo(offsetX + setbackPx, offsetY + partH + 15);
+                ctx.moveTo(centerX, centerY + partH + 20);
+                ctx.lineTo(setbackX, centerY + partH + 20);
                 ctx.strokeStyle = '#22d3ee';
+                ctx.lineWidth = 2;
                 ctx.stroke();
+                ctx.fillText(formatMM(cup.x), (centerX + setbackX) / 2, centerY + partH + 35);
                 
-                // Bottom hinge position
-                ctx.fillText(formatFraction(cup.y), offsetX + partW + 35, offsetY + partH - (cup.y * scale / 2));
+                // Bottom hinge Y
+                const hingeY = centerY + (part.height - cup.y) * scale;
+                ctx.beginPath();
+                ctx.moveTo(centerX + partW + 20, centerY + partH);
+                ctx.lineTo(centerX + partW + 20, hingeY);
+                ctx.stroke();
+                ctx.fillText(formatFraction(cup.y), centerX + partW + 45, (centerY + partH + hingeY) / 2);
             }
         }
     }
     
-    // Legend
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
+    // Legend bar at bottom
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+    ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+    
     const hingeInfo = selectedHingeOID ? getHingeInfo(selectedHingeOID) : null;
-    ctx.fillText('Hinge: ' + (hingeInfo ? hingeInfo.Name : 'None'), 10, canvas.height - 50);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Hinge: ' + (hingeInfo ? hingeInfo.Name : 'None'), 15, canvas.height - 30);
     
-    // Legend circles
-    ctx.beginPath(); ctx.arc(15, canvas.height - 30, 5, 0, Math.PI*2); ctx.fillStyle = '#dc2626'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.fillText('Cup (35mm)', 25, canvas.height - 26);
+    // Legend items
+    const legendX = 250;
+    ctx.beginPath(); ctx.arc(legendX, canvas.height - 30, 6, 0, Math.PI*2); ctx.fillStyle = '#dc2626'; ctx.fill();
+    ctx.fillStyle = '#94a3b8'; ctx.fillText('Cup', legendX + 12, canvas.height - 30);
     
-    ctx.beginPath(); ctx.arc(120, canvas.height - 30, 4, 0, Math.PI*2); ctx.fillStyle = '#16a34a'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.fillText('Pilot', 130, canvas.height - 26);
+    ctx.beginPath(); ctx.arc(legendX + 60, canvas.height - 30, 5, 0, Math.PI*2); ctx.fillStyle = '#16a34a'; ctx.fill();
+    ctx.fillStyle = '#94a3b8'; ctx.fillText('Pilot', legendX + 72, canvas.height - 30);
     
-    ctx.beginPath(); ctx.arc(180, canvas.height - 30, 4, 0, Math.PI*2); ctx.fillStyle = '#d97706'; ctx.fill();
-    ctx.fillStyle = '#94a3b8'; ctx.fillText('Drawer', 190, canvas.height - 26);
+    ctx.beginPath(); ctx.arc(legendX + 130, canvas.height - 30, 5, 0, Math.PI*2); ctx.fillStyle = '#d97706'; ctx.fill();
+    ctx.fillStyle = '#94a3b8'; ctx.fillText('Drawer', legendX + 142, canvas.height - 30);
     
-    // Measure start point marker
+    // Zoom indicator
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Zoom: ${Math.round(zoomLevel * 100)}%`, canvas.width - 15, canvas.height - 30);
+    
+    // Measure start marker
     if (measureStart) {
+        const mx = previewTransform.offsetX + panOffset.x + measureStart.x * scale;
+        const my = previewTransform.offsetY + panOffset.y + (part.height - measureStart.y) * scale;
         ctx.beginPath();
-        ctx.arc(measureStart.screenX, measureStart.screenY, 6, 0, Math.PI * 2);
+        ctx.arc(mx, my, 8, 0, Math.PI * 2);
         ctx.fillStyle = '#22d3ee';
         ctx.fill();
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
     }
+    
+    // Instructions overlay
+    if (!isPanning && !measureMode) {
+        ctx.fillStyle = 'rgba(100, 116, 139, 0.7)';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Drag to pan | Scroll to zoom', 15, 20);
+    }
 }
 
-function drawDimLine(x1, y1, x2, y2) {
+function drawArrowLine(x1, y1, x2, y2) {
     ctx.beginPath();
     ctx.moveTo(x1, y1);
     ctx.lineTo(x2, y2);
@@ -404,9 +524,9 @@ function drawDimLine(x1, y1, x2, y2) {
     ctx.lineWidth = 1;
     ctx.stroke();
     
-    // Ticks
-    const tick = 5;
-    if (y1 === y2) { // Horizontal
+    // End ticks
+    const tick = 6;
+    if (Math.abs(y1 - y2) < 1) { // Horizontal
         ctx.beginPath();
         ctx.moveTo(x1, y1 - tick); ctx.lineTo(x1, y1 + tick);
         ctx.moveTo(x2, y2 - tick); ctx.lineTo(x2, y2 + tick);
@@ -419,7 +539,6 @@ function drawDimLine(x1, y1, x2, y2) {
     }
 }
 
-// Get hinge holes from database
 function getHingeHolesFromDB(part) {
     const holes = [];
     const templateId = document.getElementById('hinge-template')?.value;
@@ -431,9 +550,11 @@ function getHingeHolesFromDB(part) {
     
     let bottomY = 3, topY = part.height - 3;
     if (template) {
-        bottomY = parseMeasurement(template.BottomHinge.replace('[top]-', '').replace('[top]', ''));
+        const bottomVal = template.BottomHinge.replace('[top]-', '').replace('[top]', '');
+        bottomY = parseMeasurement(bottomVal);
         if (template.TopHinge.includes('[top]')) {
-            topY = part.height - parseMeasurement(template.TopHinge.replace('[top]-', '').replace('[top]', ''));
+            const topVal = template.TopHinge.replace('[top]-', '').replace('[top]', '');
+            topY = part.height - parseMeasurement(topVal);
         }
     }
     
@@ -455,9 +576,9 @@ function getHingeHolesFromDB(part) {
 
 function getHingeHolesFallback(part) {
     const holes = [];
-    const cup = 35 / 25.4, pilot = 8 / 25.4, offset = 22.5 / 25.4, setback = 22.5 / 25.4;
+    const cup = 35/25.4, pilot = 8/25.4, offset = 22.5/25.4, setback = 22.5/25.4;
     [3, part.height - 3].forEach(y => {
-        holes.push({ x: setback, y: y, diameter: cup, color: '#dc2626' });
+        holes.push({ x: setback, y, diameter: cup, color: '#dc2626' });
         holes.push({ x: setback, y: y - offset, diameter: pilot, color: '#16a34a' });
         holes.push({ x: setback, y: y + offset, diameter: pilot, color: '#16a34a' });
     });
@@ -465,48 +586,13 @@ function getHingeHolesFallback(part) {
 }
 
 function getDrawerHoles(part) {
-    const dia = 5 / 25.4, inset = 1.5;
+    const dia = 5/25.4, inset = 1.5;
     return [
         { x: inset, y: inset, diameter: dia, color: '#d97706' },
         { x: part.width - inset, y: inset, diameter: dia, color: '#d97706' },
         { x: inset, y: part.height - inset, diameter: dia, color: '#d97706' },
         { x: part.width - inset, y: part.height - inset, diameter: dia, color: '#d97706' }
     ];
-}
-
-// Canvas click handler
-function handleCanvasClick(e) {
-    if (!measureMode) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const partX = (x - previewTransform.offsetX) / previewTransform.scale;
-    const partY = previewTransform.partHeight - (y - previewTransform.offsetY) / previewTransform.scale;
-    
-    if (!measureStart) {
-        measureStart = { x: partX, y: partY, screenX: x, screenY: y };
-        document.getElementById('btn-measure').textContent = 'Click End Point';
-        document.getElementById('measure-result').textContent = 'Click second point to measure...';
-        updatePreview();
-    } else {
-        const dx = partX - measureStart.x;
-        const dy = partY - measureStart.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        document.getElementById('measure-result').innerHTML = 
-            `<strong>Distance:</strong> ${formatFraction(dist)} (${formatMM(dist)}) | ` +
-            `<strong>dX:</strong> ${formatFraction(Math.abs(dx))} | ` +
-            `<strong>dY:</strong> ${formatFraction(Math.abs(dy))}`;
-        
-        measureStart = null;
-        measureMode = false;
-        document.getElementById('btn-measure').textContent = 'Measure';
-        document.getElementById('btn-measure').classList.remove('active');
-        canvas.style.cursor = 'default';
-        updatePreview();
-    }
 }
 
 // Controls
@@ -520,25 +606,26 @@ function toggleMeasure() {
     measureMode = !measureMode;
     measureStart = null;
     document.getElementById('btn-measure').classList.toggle('active', measureMode);
-    document.getElementById('btn-measure').textContent = measureMode ? 'Click Start Point' : 'Measure';
-    document.getElementById('measure-result').textContent = measureMode ? 'Click first point on the part...' : '';
-    canvas.style.cursor = measureMode ? 'crosshair' : 'default';
+    document.getElementById('btn-measure').textContent = measureMode ? 'Click Start' : 'Measure';
+    document.getElementById('measure-result').textContent = measureMode ? 'Click first point...' : '';
+    canvas.style.cursor = measureMode ? 'crosshair' : 'grab';
     updatePreview();
 }
 
-function zoomIn() { zoomLevel = Math.min(zoomLevel * 1.25, 3); updatePreview(); }
-function zoomOut() { zoomLevel = Math.max(zoomLevel / 1.25, 0.5); updatePreview(); }
-function resetZoom() { zoomLevel = 1; updatePreview(); }
+function zoomIn() { zoomLevel = Math.min(zoomLevel * 1.25, 5); updatePreview(); }
+function zoomOut() { zoomLevel = Math.max(zoomLevel / 1.25, 0.25); updatePreview(); }
+function resetZoom() { zoomLevel = 1; panOffset = { x: 0, y: 0 }; updatePreview(); }
 
 // Formatting
 function formatFraction(decimal) {
+    if (decimal < 0) return '-' + formatFraction(-decimal);
     const whole = Math.floor(decimal);
     const frac = decimal - whole;
-    const fractions = [[1/16,'1/16'],[1/8,'1/8'],[3/16,'3/16'],[1/4,'1/4'],[5/16,'5/16'],[3/8,'3/8'],[7/16,'7/16'],[1/2,'1/2'],[9/16,'9/16'],[5/8,'5/8'],[11/16,'11/16'],[3/4,'3/4'],[13/16,'13/16'],[7/8,'7/8'],[15/16,'15/16']];
+    const fracs = [[1/16,'1/16'],[1/8,'1/8'],[3/16,'3/16'],[1/4,'1/4'],[5/16,'5/16'],[3/8,'3/8'],[7/16,'7/16'],[1/2,'1/2'],[9/16,'9/16'],[5/8,'5/8'],[11/16,'11/16'],[3/4,'3/4'],[13/16,'13/16'],[7/8,'7/8'],[15/16,'15/16']];
     if (frac < 0.03) return whole + '"';
-    let closest = fractions[0], minDiff = Math.abs(frac - fractions[0][0]);
-    for (const [v, s] of fractions) { const d = Math.abs(frac - v); if (d < minDiff) { minDiff = d; closest = [v, s]; } }
-    return whole > 0 ? `${whole}-${closest[1]}"` : `${closest[1]}"`;
+    let best = fracs[0], minD = Math.abs(frac - fracs[0][0]);
+    for (const [v, s] of fracs) { const d = Math.abs(frac - v); if (d < minD) { minD = d; best = [v, s]; } }
+    return whole > 0 ? `${whole}-${best[1]}"` : `${best[1]}"`;
 }
 
 function parseFraction(str) {
