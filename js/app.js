@@ -39,9 +39,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function resizeCanvas() {
     const container = document.getElementById('preview-container');
-    if (container) {
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight;
+    if (container && canvas) {
+        // Just trigger updatePreview which handles the sizing
         updatePreview();
     }
 }
@@ -477,19 +476,31 @@ function printCutList() {
 
 // === PREVIEW CANVAS ===
 function updatePreview() {
-    if (!ctx) return;
-    const W = canvas.width, H = canvas.height;
-    const dpr = window.devicePixelRatio || 1;
+    if (!ctx || !canvas) return;
+    
+    const container = document.getElementById('preview-container');
+    if (!container) return;
+    
+    // Get container dimensions
+    const rect = container.getBoundingClientRect();
+    const W = rect.width;
+    const H = rect.height;
+    
+    if (W <= 0 || H <= 0) return;
     
     // High DPI support
-    if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
-        canvas.width = W * dpr;
-        canvas.height = H * dpr;
+    const dpr = window.devicePixelRatio || 1;
+    
+    // Only resize if needed
+    if (canvas.width !== Math.floor(W * dpr) || canvas.height !== Math.floor(H * dpr)) {
+        canvas.width = Math.floor(W * dpr);
+        canvas.height = Math.floor(H * dpr);
         canvas.style.width = W + 'px';
         canvas.style.height = H + 'px';
-        ctx.scale(dpr, dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     
+    // Clear canvas
     ctx.clearRect(0, 0, W, H);
     
     // Background gradient
