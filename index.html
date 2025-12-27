@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ShopFlow - Cabinet CNC Configurator</title>
+    <title>ShopFlow - Door Production</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -12,14 +12,41 @@
             <h1>ShopFlow</h1>
             <div class="db-info" id="db-info">Loading...</div>
         </div>
-        <button class="btn btn-success" onclick="exportAllDXF()">Export All DXF</button>
+        <div class="header-actions">
+            <button class="btn" onclick="showImportModal()">📥 Import CSV</button>
+            <button class="btn" onclick="saveJob()">💾 Save Job</button>
+            <button class="btn" onclick="loadJob()">📂 Load Job</button>
+            <button class="btn" onclick="printCutList()">🖨️ Print Cut List</button>
+            <button class="btn btn-success" onclick="exportAllDXF()">📤 Export All DXF</button>
+        </div>
     </div>
     
     <div class="container">
+        <!-- Job Info Bar -->
+        <div class="job-info-bar">
+            <div class="job-field">
+                <label>Job #</label>
+                <input type="text" id="job-number" placeholder="2024-001">
+            </div>
+            <div class="job-field">
+                <label>Customer</label>
+                <input type="text" id="customer-name" placeholder="Customer Name">
+            </div>
+            <div class="job-field">
+                <label>Date</label>
+                <input type="date" id="job-date">
+            </div>
+            <div class="job-field" style="flex:2;">
+                <label>Notes</label>
+                <input type="text" id="job-notes" placeholder="Kitchen reface, white shaker...">
+            </div>
+        </div>
+        
+        <!-- Stats Row -->
         <div class="stats-row">
             <div class="stat">
                 <div class="stat-value" id="stat-parts">0</div>
-                <div class="stat-label">Parts</div>
+                <div class="stat-label">Total Parts</div>
             </div>
             <div class="stat">
                 <div class="stat-value" id="stat-doors">0</div>
@@ -27,11 +54,15 @@
             </div>
             <div class="stat">
                 <div class="stat-value" id="stat-drawers">0</div>
-                <div class="stat-label">Drawers</div>
+                <div class="stat-label">Drawer Fronts</div>
             </div>
             <div class="stat">
-                <div class="stat-value" id="stat-holes">0</div>
-                <div class="stat-label">DB Holes</div>
+                <div class="stat-value" id="stat-sqft">0</div>
+                <div class="stat-label">Sq Ft</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="stat-sheets">0</div>
+                <div class="stat-label">Sheets (4x8)</div>
             </div>
         </div>
         
@@ -49,17 +80,13 @@
                             <div class="search-box">
                                 <input type="text" id="hinge-search" placeholder="Search hinges..." oninput="filterHardware('hinge')">
                             </div>
-                            <div class="hardware-list" id="hinge-list">
-                                <!-- Hinges populated here -->
-                            </div>
+                            <div class="hardware-list" id="hinge-list"></div>
                         </div>
                         <div id="tab-slide" class="tab-content">
                             <div class="search-box">
                                 <input type="text" id="slide-search" placeholder="Search slides..." oninput="filterHardware('slide')">
                             </div>
-                            <div class="hardware-list" id="slide-list">
-                                <!-- Slides populated here -->
-                            </div>
+                            <div class="hardware-list" id="slide-list"></div>
                         </div>
                     </div>
                 </div>
@@ -68,12 +95,43 @@
                     <div class="card-header">Hinge Template</div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label>Template</label>
+                            <label>Vertical Position</label>
                             <select id="hinge-template" onchange="updateHingeTemplate()"></select>
                         </div>
                         <div class="template-info">
                             <div><strong>Bottom:</strong> <span id="bottom-hinge">3"</span></div>
                             <div><strong>Top:</strong> <span id="top-hinge">[top]-3"</span></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">Material</div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>Thickness</label>
+                            <select id="material-thickness">
+                                <option value="0.75">3/4" (19mm)</option>
+                                <option value="0.625">5/8" (16mm)</option>
+                                <option value="0.5">1/2" (12.7mm)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Sheet Size</label>
+                            <select id="sheet-size" onchange="updateStats()">
+                                <option value="32">4' x 8' (32 sq ft)</option>
+                                <option value="40">5' x 8' (40 sq ft)</option>
+                                <option value="20">4' x 5' (20 sq ft)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Waste Factor</label>
+                            <select id="waste-factor" onchange="updateStats()">
+                                <option value="1.15">15% (Standard)</option>
+                                <option value="1.20">20% (Mixed sizes)</option>
+                                <option value="1.25">25% (Complex)</option>
+                                <option value="1.10">10% (Optimized)</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -103,24 +161,27 @@
                 </div>
             </div>
             
-            <!-- Right Panel -->
+            <!-- Right Panel - Parts List -->
             <div class="right-panel">
-                <div class="card">
+                <div class="card" style="flex:1;">
                     <div class="card-header">
                         <span>Parts List</span>
-                        <button class="btn btn-primary btn-sm" onclick="addPart()">+ Add</button>
+                        <div>
+                            <button class="btn btn-sm" onclick="clearAllParts()">Clear</button>
+                            <button class="btn btn-primary btn-sm" onclick="addPart()">+ Add</button>
+                        </div>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body" style="padding:0;">
                         <div class="parts-scroll">
                             <table class="parts-table">
                                 <thead>
                                     <tr>
-                                        <th></th>
+                                        <th style="width:30px;"></th>
                                         <th>Name</th>
-                                        <th>W</th>
-                                        <th>H</th>
-                                        <th>Type</th>
-                                        <th></th>
+                                        <th style="width:65px;">Width</th>
+                                        <th style="width:65px;">Height</th>
+                                        <th style="width:70px;">Type</th>
+                                        <th style="width:30px;"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="parts-tbody"></tbody>
@@ -128,26 +189,36 @@
                         </div>
                     </div>
                 </div>
-                
-                <div class="card">
-                    <div class="card-header">DXF Settings</div>
-                    <div class="card-body">
-                        <div class="form-group">
-                            <label>Material Thickness</label>
-                            <select id="material-thickness">
-                                <option value="0.75">3/4" (19mm)</option>
-                                <option value="0.5">1/2" (12.7mm)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Layer Format</label>
-                            <select id="layer-format">
-                                <option value="cabinetsense">CabinetSense</option>
-                                <option value="simple">Simple</option>
-                            </select>
-                        </div>
-                    </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Import Modal -->
+    <div id="import-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Import Parts from CSV</h3>
+                <button onclick="hideImportModal()" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Paste CSV data or upload a file. Format:</p>
+                <code>Name, Width, Height, Type</code>
+                <p style="font-size:0.75rem;color:#666;margin-top:0.5rem;">
+                    Width/Height: Use fractions (15-1/2) or decimals (15.5)<br>
+                    Type: door or drawer
+                </p>
+                <textarea id="csv-input" placeholder="Upper Left, 15-1/2, 30, door
+Upper Right, 15-1/2, 30, door
+Base Door 1, 18, 24, door
+Drawer 1, 18, 6, drawer
+Drawer 2, 18, 8, drawer"></textarea>
+                <div style="margin-top:0.5rem;">
+                    <input type="file" id="csv-file" accept=".csv,.txt" onchange="loadCSVFile(event)">
                 </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="hideImportModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="importCSV()">Import</button>
             </div>
         </div>
     </div>
