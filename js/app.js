@@ -821,7 +821,6 @@ function exportAllDXF() {
 }
 
 function exportDXF(list) {
-    // Use the vector DXF export with proper layer names and vector text
     const job = document.getElementById('job-number').value || 'job';
     const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
     
@@ -829,14 +828,17 @@ function exportDXF(list) {
         const hingeSide = part.hingeSide || 'left';
         const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
         
-        // Layer names to match Aspire toolpath templates
-        // "Drill 35mm" matches "01h Drill 35mm.ToolpathTemplate"
-        // "Drill 8mm" matches "01d Drill 8mm.ToolpathTemplate"
+        // Collect unique layer names from holes (data-driven!)
+        const drillLayers = new Set();
+        holes.forEach(h => {
+            if (h.layer) drillLayers.add(h.layer);
+        });
+        
+        // Build layer list: drilling layers + profile + pencil
         const layers = [
-            { name: 'Drill 35mm', color: 1 },   // Red - cup boring
-            { name: 'Drill 8mm', color: 3 },    // Green - pilot holes
-            { name: 'Profile', color: 7 },      // White - outline cut
-            { name: 'Pencil', color: 5 }        // Blue - label engraving
+            ...Array.from(drillLayers).map(name => ({ name: name, color: 1 })),  // Red for drills
+            { name: 'Profile', color: 7 },    // White for outline
+            { name: 'Pencil', color: 4 }      // Cyan for engraving
         ];
         
         // DXF Header
@@ -848,8 +850,11 @@ function exportDXF(list) {
         // Tables - Layers
         dxf += '0\nSECTION\n2\nTABLES\n';
         dxf += '0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
-        layers.forEach(l => {
-            dxf += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + l.color + '\n6\nCONTINUOUS\n';
+        layers.forEach((l, i) => {
+            // Different colors for different drill sizes
+            const color = l.name.includes('35') ? 1 : l.name.includes('8') ? 3 : 
+                         l.name.includes('5') ? 5 : l.name.includes('10') ? 6 : l.color;
+            dxf += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + color + '\n6\nCONTINUOUS\n';
         });
         dxf += '0\nENDTAB\n0\nENDSEC\n';
         
@@ -863,16 +868,10 @@ function exportDXF(list) {
         dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
         dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
         
-        // Cup holes (35mm) on Drill 35mm layer
-        holes.filter(h => h.isCup).forEach(h => {
-            dxf += '0\nCIRCLE\n8\nDrill 35mm\n';
-            dxf += '10\n' + h.x.toFixed(4) + '\n20\n' + h.y.toFixed(4) + '\n30\n0\n';
-            dxf += '40\n' + (h.dia / 2).toFixed(4) + '\n';
-        });
-        
-        // Pilot holes (8mm) on Drill 8mm layer
-        holes.filter(h => !h.isCup).forEach(h => {
-            dxf += '0\nCIRCLE\n8\nDrill 8mm\n';
+        // Holes - each on its specific layer from the data
+        holes.forEach(h => {
+            const layer = h.layer || 'Drill 8mm';
+            dxf += '0\nCIRCLE\n8\n' + layer + '\n';
             dxf += '10\n' + h.x.toFixed(4) + '\n20\n' + h.y.toFixed(4) + '\n30\n0\n';
             dxf += '40\n' + (h.dia / 2).toFixed(4) + '\n';
         });
@@ -880,22 +879,19 @@ function exportDXF(list) {
         // Vector text labels on Pencil layer
         const cx = part.width / 2;
         const cy = part.height / 2;
-        
-        // Part name as vector strokes
         dxf += vectorText(part.name, cx, cy + 0.3, 0.5, 'Pencil');
         
-        // Hinge side indicator
         const sideCode = hingeSide === 'left' ? 'L' : hingeSide === 'right' ? 'R' : 
                         hingeSide === 'both' ? 'LR' : hingeSide === 'top' ? 'T' : 'B';
         dxf += vectorText(sideCode, cx, cy - 0.3, 0.4, 'Pencil');
         
-        // Dimensions
         const dimText = Math.round(part.width * 25.4) + 'x' + Math.round(part.height * 25.4);
         dxf += vectorText(dimText, cx, cy - 0.9, 0.25, 'Pencil');
         
         dxf += '0\nENDSEC\n0\nEOF\n';
         
-        // Download
+        // Download with descriptive filename
+        const layerInfo = Array.from(drillLayers).join('_').replace(/\s+/g, '');
         const fn = job + '_' + part.name + '_' + sideCode + '.dxf';
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
@@ -903,7 +899,6 @@ function exportDXF(list) {
         a.click();
     });
 }
-
 // Stroke font for vector text (simplified block letters)
 const STROKE_FONT = {
     'A': [[[0,0],[0.5,1],[1,0]], [[0.2,0.4],[0.8,0.4]]],
