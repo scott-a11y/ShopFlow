@@ -93,38 +93,52 @@ function doMeasure(x, y) {
         const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
         const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
         
-        // Find nearest hole center
-        let nearestDist = Infinity;
-        let nearestHole = null;
-        const snapRadius = 1.5; // inches - snap if within 1.5" of hole center
+        const snapRadius = 1.5; // inches
+        let snapped = false;
         
-        holes.forEach(h => {
-            const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
-            if (dist < nearestDist && dist < snapRadius) {
-                nearestDist = dist;
-                nearestHole = h;
+        // First check if clicking near an EDGE (within snapRadius of edge line)
+        // Left edge
+        if (px < snapRadius && py >= 0 && py <= part.height) {
+            px = 0;
+            py = Math.max(0, Math.min(part.height, py));
+            snapped = true;
+        }
+        // Right edge
+        else if (px > part.width - snapRadius && py >= 0 && py <= part.height) {
+            px = part.width;
+            py = Math.max(0, Math.min(part.height, py));
+            snapped = true;
+        }
+        // Bottom edge
+        else if (py < snapRadius && px >= 0 && px <= part.width) {
+            py = 0;
+            px = Math.max(0, Math.min(part.width, px));
+            snapped = true;
+        }
+        // Top edge
+        else if (py > part.height - snapRadius && px >= 0 && px <= part.width) {
+            py = part.height;
+            px = Math.max(0, Math.min(part.width, px));
+            snapped = true;
+        }
+        
+        // If not on edge, check holes
+        if (!snapped) {
+            let nearestDist = Infinity;
+            let nearestHole = null;
+            
+            holes.forEach(h => {
+                const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
+                if (dist < nearestDist && dist < snapRadius) {
+                    nearestDist = dist;
+                    nearestHole = h;
+                }
+            });
+            
+            if (nearestHole) {
+                px = nearestHole.x;
+                py = nearestHole.y;
             }
-        });
-        
-        // Also check corners
-        const corners = [
-            { x: 0, y: 0, name: 'Bottom-Left' },
-            { x: part.width, y: 0, name: 'Bottom-Right' },
-            { x: 0, y: part.height, name: 'Top-Left' },
-            { x: part.width, y: part.height, name: 'Top-Right' }
-        ];
-        corners.forEach(c => {
-            const dist = Math.sqrt(Math.pow(px - c.x, 2) + Math.pow(py - c.y, 2));
-            if (dist < nearestDist && dist < snapRadius) {
-                nearestDist = dist;
-                nearestHole = c;
-            }
-        });
-        
-        // Snap to hole/corner center if found
-        if (nearestHole) {
-            px = nearestHole.x;
-            py = nearestHole.y;
         }
     }
     
