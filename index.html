@@ -39,7 +39,7 @@
             <!-- Left Panel -->
             <div class="left-panel">
                 <div class="card">
-                    <div class="card-header">Hardware</div>
+                    <div class="card-header">Hardware Selection</div>
                     <div class="card-body">
                         <div class="tab-bar">
                             <div class="tab active" data-tab="hinge">Hinges</div>
@@ -47,15 +47,19 @@
                         </div>
                         <div id="tab-hinge" class="tab-content active">
                             <div class="search-box">
-                                <input type="text" id="hinge-search" placeholder="Search..." oninput="filterHardware('hinge')">
+                                <input type="text" id="hinge-search" placeholder="Search hinges..." oninput="filterHardware('hinge')">
                             </div>
-                            <div class="scroll-container" id="hinge-list"></div>
+                            <div class="hardware-list" id="hinge-list">
+                                <!-- Hinges populated here -->
+                            </div>
                         </div>
                         <div id="tab-slide" class="tab-content">
                             <div class="search-box">
-                                <input type="text" id="slide-search" placeholder="Search..." oninput="filterHardware('slide')">
+                                <input type="text" id="slide-search" placeholder="Search slides..." oninput="filterHardware('slide')">
                             </div>
-                            <div class="scroll-container" id="slide-list"></div>
+                            <div class="hardware-list" id="slide-list">
+                                <!-- Slides populated here -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -67,7 +71,7 @@
                             <label>Template</label>
                             <select id="hinge-template" onchange="updateHingeTemplate()"></select>
                         </div>
-                        <div style="font-size:0.75rem; color: var(--text-muted);">
+                        <div class="template-info">
                             <div><strong>Bottom:</strong> <span id="bottom-hinge">3"</span></div>
                             <div><strong>Top:</strong> <span id="top-hinge">[top]-3"</span></div>
                         </div>
@@ -76,36 +80,38 @@
             </div>
             
             <!-- Center Panel -->
-            <div class="card">
-                <div class="card-header">
-                    <span>Preview</span>
-                    <select id="preview-select" onchange="updatePreview()" style="padding:0.25rem 0.5rem;border-radius:4px;border:1px solid #e2e8f0;font-size:0.8125rem;"></select>
-                </div>
-                <div class="card-body">
-                    <div class="preview-container" id="preview-container">
-                        <canvas id="preview"></canvas>
+            <div class="center-panel">
+                <div class="card preview-card">
+                    <div class="card-header">
+                        <span>Preview</span>
+                        <select id="preview-select" onchange="updatePreview()"></select>
                     </div>
-                    <div class="preview-controls">
-                        <button class="btn btn-primary" onclick="exportSelectedDXF()">Export DXF</button>
-                        <button class="btn" onclick="zoomIn()">+</button>
-                        <button class="btn" onclick="zoomOut()">-</button>
-                        <button class="btn" onclick="resetZoom()">Reset</button>
-                        <button class="btn active" id="btn-dimensions" onclick="toggleDimensions()">Dims</button>
-                        <button class="btn" id="btn-measure" onclick="toggleMeasure()">Measure</button>
+                    <div class="card-body">
+                        <div class="preview-container" id="preview-container">
+                            <canvas id="preview"></canvas>
+                        </div>
+                        <div class="preview-controls">
+                            <button class="btn btn-primary" onclick="exportSelectedDXF()">Export DXF</button>
+                            <button class="btn" onclick="zoomIn()">+</button>
+                            <button class="btn" onclick="zoomOut()">−</button>
+                            <button class="btn" onclick="resetZoom()">Reset</button>
+                            <button class="btn active" id="btn-dimensions" onclick="toggleDimensions()">Dims</button>
+                            <button class="btn" id="btn-measure" onclick="toggleMeasure()">Measure</button>
+                        </div>
+                        <div class="measure-result" id="measure-result">Drag to pan • Scroll to zoom</div>
                     </div>
-                    <div class="measure-result" id="measure-result">Drag to pan, scroll to zoom</div>
                 </div>
             </div>
             
             <!-- Right Panel -->
             <div class="right-panel">
-                <div class="card" style="flex:2;">
+                <div class="card">
                     <div class="card-header">
-                        <span>Parts</span>
+                        <span>Parts List</span>
                         <button class="btn btn-primary btn-sm" onclick="addPart()">+ Add</button>
                     </div>
                     <div class="card-body">
-                        <div class="scroll-container">
+                        <div class="parts-scroll">
                             <table class="parts-table">
                                 <thead>
                                     <tr>
@@ -124,13 +130,13 @@
                 </div>
                 
                 <div class="card">
-                    <div class="card-header">Settings</div>
+                    <div class="card-header">DXF Settings</div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label>Material</label>
+                            <label>Material Thickness</label>
                             <select id="material-thickness">
-                                <option value="0.75">3/4"</option>
-                                <option value="0.5">1/2"</option>
+                                <option value="0.75">3/4" (19mm)</option>
+                                <option value="0.5">1/2" (12.7mm)</option>
                             </select>
                         </div>
                         <div class="form-group">
