@@ -828,17 +828,26 @@ function exportDXF(list) {
         const hingeSide = part.hingeSide || 'left';
         const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
         
-        // Collect unique layer names from holes (data-driven!)
+        // Collect unique drill layers from hole data
         const drillLayers = new Set();
-        holes.forEach(h => {
-            if (h.layer) drillLayers.add(h.layer);
-        });
+        holes.forEach(h => { if (h.layer) drillLayers.add(h.layer); });
         
-        // Build layer list: drilling layers + profile + pencil
+        // All layers - drilling + profile options + engraving
+        // Layer names match Aspire toolpath template file names
         const layers = [
-            ...Array.from(drillLayers).map(name => ({ name: name, color: 1 })),  // Red for drills
-            { name: 'Profile', color: 7 },    // White for outline
-            { name: 'Pencil', color: 4 }      // Cyan for engraving
+            // Drilling layers (from hole data)
+            ...Array.from(drillLayers).map(name => ({ name: name, color: 1 })),
+            
+            // Profile/Cutout layers - multiple options for different tools
+            { name: 'Compression 0.5', color: 7 },       // Main profile cut
+            { name: 'Compression 0.375', color: 7 },     // Smaller compression
+            { name: 'End Mill 0.375 DC', color: 8 },     // Down cut end mill
+            { name: 'End Mill 0.25 DC', color: 8 },      // Fine detail
+            { name: 'End Mill 0.375 Rougher DC', color: 9 }, // Roughing pass
+            
+            // Engraving
+            { name: 'Pencil', color: 4 },                // V-bit/pencil engraving
+            { name: 'End Mill 0.125 DC', color: 6 }      // Fine engraving
         ];
         
         // DXF Header
@@ -850,25 +859,30 @@ function exportDXF(list) {
         // Tables - Layers
         dxf += '0\nSECTION\n2\nTABLES\n';
         dxf += '0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
-        layers.forEach((l, i) => {
-            // Different colors for different drill sizes
-            const color = l.name.includes('35') ? 1 : l.name.includes('8') ? 3 : 
-                         l.name.includes('5') ? 5 : l.name.includes('10') ? 6 : l.color;
+        layers.forEach(l => {
+            // Color coding: drills=red/green, profile=white/gray, engrave=cyan
+            let color = l.color;
+            if (l.name.includes('35')) color = 1;      // Red - 35mm
+            else if (l.name.includes('8mm')) color = 3; // Green - 8mm
+            else if (l.name.includes('5mm')) color = 5; // Blue - 5mm
             dxf += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + color + '\n6\nCONTINUOUS\n';
         });
         dxf += '0\nENDTAB\n0\nENDSEC\n';
         
-        // Entities
+        // Entities section
         dxf += '0\nSECTION\n2\nENTITIES\n';
         
-        // Profile outline (closed polyline)
-        dxf += '0\nLWPOLYLINE\n8\nProfile\n90\n4\n70\n1\n';
-        dxf += '10\n0\n20\n0\n';
-        dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
-        dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
-        dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
+        // Profile outline on MULTIPLE layers (user picks which to use in Aspire)
+        const profileLayers = ['Compression 0.5', 'Compression 0.375', 'End Mill 0.375 DC'];
+        profileLayers.forEach(layer => {
+            dxf += '0\nLWPOLYLINE\n8\n' + layer + '\n90\n4\n70\n1\n';
+            dxf += '10\n0\n20\n0\n';
+            dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
+            dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
+            dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
+        });
         
-        // Holes - each on its specific layer from the data
+        // Holes on their data-driven layers
         holes.forEach(h => {
             const layer = h.layer || 'Drill 8mm';
             dxf += '0\nCIRCLE\n8\n' + layer + '\n';
@@ -890,8 +904,7 @@ function exportDXF(list) {
         
         dxf += '0\nENDSEC\n0\nEOF\n';
         
-        // Download with descriptive filename
-        const layerInfo = Array.from(drillLayers).join('_').replace(/\s+/g, '');
+        // Download
         const fn = job + '_' + part.name + '_' + sideCode + '.dxf';
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
