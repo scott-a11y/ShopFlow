@@ -181,6 +181,18 @@ body {
 }
 
 .hardware-item:last-child { border-bottom: none; }
+
+.hardware-group {
+    padding: 0.5rem 0.75rem;
+    background: #f1f5f9;
+    font-weight: 600;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+}
 .hardware-item:hover { background: #f8fafc; }
 .hardware-item.selected { background: #eff6ff; border-left: 3px solid var(--primary); }
 .hardware-item .name { font-weight: 600; font-size: 0.8125rem; }

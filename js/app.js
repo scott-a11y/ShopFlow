@@ -175,37 +175,109 @@ function getHingeInfo(oid) {
 function populateHardwareLists() {
     const hingeList = document.getElementById('hinge-list');
     
-    // Get all door hinges (Class 28)
-    const hinges = DB?.Part?.filter(p => String(p.Class) === '28') || [];
-    console.log('Found hinges:', hinges.length, hinges.map(h => h.Name));
+    // Get parts that have hole patterns defined
+    const partsWithHoles = new Set(DB?.Hole?.map(h => String(h.OIDPart)) || []);
+    
+    // Class definitions
+    const classNames = {
+        '28': 'Door Hinge',
+        '15': 'Hinge Clip', 
+        '25': 'Slide System',
+        '36': 'Connector',
+        '33': 'Handle'
+    };
+    
+    // Get hinges (Class 28) and hinge clips (Class 15)
+    const hingeClasses = ['28', '15'];
+    const hinges = DB?.Part?.filter(p => 
+        hingeClasses.includes(String(p.Class)) && 
+        partsWithHoles.has(String(p.OID))
+    ) || [];
+    
+    console.log('Found hinges/clips:', hinges.length);
     
     if (hinges.length === 0) {
         hingeList.innerHTML = '<div style="padding:10px;color:#666;">No hinges found</div>';
-        return;
+    } else {
+        // Group by class
+        let html = '';
+        
+        // Door Hinges first
+        const doorHinges = hinges.filter(h => String(h.Class) === '28');
+        if (doorHinges.length) {
+            html += '<div class="hardware-group">Door Hinges</div>';
+            html += doorHinges.map(h => {
+                const pattern = getHingeHolePattern(h.OID);
+                return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
+                    <div class="name">${h.Name || 'Unnamed'}</div>
+                    <div class="details">${pattern?.length || 0} holes</div>
+                </div>`;
+            }).join('');
+        }
+        
+        // Hinge Clips
+        const hingeClips = hinges.filter(h => String(h.Class) === '15');
+        if (hingeClips.length) {
+            html += '<div class="hardware-group">Hinge Clips</div>';
+            html += hingeClips.map(h => {
+                const pattern = getHingeHolePattern(h.OID);
+                return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
+                    <div class="name">${h.Name || 'Unnamed'}</div>
+                    <div class="details">${pattern?.length || 0} holes</div>
+                </div>`;
+            }).join('');
+        }
+        
+        hingeList.innerHTML = html;
+        
+        // Auto-select first hinge
+        if (doorHinges.length > 0) {
+            selectHinge(doorHinges[0].OID);
+        }
     }
     
-    hingeList.innerHTML = hinges.map(h => {
-        const pattern = getHingeHolePattern(h.OID);
-        const holeCount = pattern ? pattern.length : 0;
-        return `<div class="hardware-item" data-oid="${h.OID}" onclick="selectHinge('${h.OID}')">
-            <div class="name">${h.Name || 'Unnamed'}</div>
-            <div class="details">${holeCount} holes | Depth: ${pattern?.[0]?.depth ? (pattern[0].depth * 25.4).toFixed(1) + 'mm' : '?'}</div>
-        </div>`;
-    }).join('');
-    
-    // Auto-select first hinge
-    if (hinges.length > 0) {
-        selectHinge(hinges[0].OID);
-    }
-    
-    // Slides
+    // Slides - Show Slide Systems (Class 25) which are the named systems
     const slideList = document.getElementById('slide-list');
-    const slides = DB?.SlideSystems || [];
-    slideList.innerHTML = slides.map(s => 
-        `<div class="hardware-item" data-oid="${s.OID}">
-            <div class="name">${s.Name || 'Slide ' + s.OID}</div>
-        </div>`
-    ).join('');
+    const slideSystems = DB?.Part?.filter(p => 
+        String(p.Class) === '25' && 
+        partsWithHoles.has(String(p.OID))
+    ) || [];
+    
+    console.log('Found slide systems:', slideSystems.length);
+    
+    if (slideSystems.length === 0) {
+        slideList.innerHTML = '<div style="padding:10px;color:#666;">No slide systems found</div>';
+    } else {
+        // Group by manufacturer
+        const byMfr = {};
+        slideSystems.forEach(s => {
+            const name = s.Name || '';
+            let mfr = 'Other';
+            if (name.includes('Blum')) mfr = 'Blum';
+            else if (name.includes('Hettich')) mfr = 'Hettich';
+            else if (name.includes('Grass')) mfr = 'Grass';
+            else if (name.includes('Salice')) mfr = 'Salice';
+            else if (name.includes('KV')) mfr = 'KV';
+            else if (name.includes('Hafele')) mfr = 'Hafele';
+            
+            if (!byMfr[mfr]) byMfr[mfr] = [];
+            byMfr[mfr].push(s);
+        });
+        
+        let html = '';
+        for (const [mfr, systems] of Object.entries(byMfr).sort()) {
+            html += `<div class="hardware-group">${mfr}</div>`;
+            html += systems.map(s => {
+                const pattern = getHingeHolePattern(s.OID);
+                return `<div class="hardware-item" data-oid="${s.OID}" onclick="selectSlide('${s.OID}')">
+                    <div class="name">${s.Name}</div>
+                    <div class="details">${pattern?.length || 0} holes</div>
+                </div>`;
+            }).join('');
+        }
+        
+        slideList.innerHTML = html;
+    }
 }
 
 function selectHinge(oid) {
@@ -217,6 +289,16 @@ function selectHinge(oid) {
     });
     
     updatePreview();
+}
+
+function selectSlide(oid) {
+    console.log('Selected slide:', oid);
+    
+    document.querySelectorAll('#slide-list .hardware-item').forEach(el => {
+        el.classList.toggle('selected', String(el.dataset.oid) === String(oid));
+    });
+    
+    // For now, just highlight - drawer slide hole patterns would need different handling
 }
 
 function populateHingeTemplates() {
