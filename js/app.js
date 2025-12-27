@@ -9,6 +9,7 @@ let measureMode = false;
 let measureStart = null;
 let selectedHingeOID = null;
 let canvas, ctx;
+let displayUnits = 'fraction'; // 'fraction', 'decimal', 'metric'
 
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
@@ -107,8 +108,8 @@ function handleMeasureClick(x, y) {
         measureStart.distance = dist;
         
         document.getElementById('measure-result').innerHTML = 
-            `<b>Distance:</b> ${formatFraction(dist)} (${(dist * 25.4).toFixed(2)}mm) | ` +
-            `<b>ΔX:</b> ${formatFraction(Math.abs(dx))} | <b>ΔY:</b> ${formatFraction(Math.abs(dy))}`;
+            `<b>Distance:</b> ${formatDimension(dist)} (${(dist * 25.4).toFixed(2)}mm) | ` +
+            `<b>ΔX:</b> ${formatDimension(Math.abs(dx))} | <b>ΔY:</b> ${formatDimension(Math.abs(dy))}`;
         
         updatePreview();
         
@@ -285,6 +286,12 @@ function initUI() {
     canvas.style.cursor = 'grab';
 }
 
+function updateUnits() {
+    displayUnits = document.getElementById('display-units').value;
+    renderParts();
+    updatePreview();
+}
+
 function filterHardware(type) {
     const search = document.getElementById(type + '-search').value.toLowerCase();
     document.querySelectorAll(`#${type}-list .hardware-item`).forEach(item => {
@@ -298,8 +305,8 @@ function renderParts() {
         <tr data-id="${p.id}">
             <td><input type="checkbox" ${p.selected !== false ? 'checked' : ''} onchange="togglePart(${p.id})"></td>
             <td><input value="${p.name}" onchange="updatePart(${p.id},'name',this.value)"></td>
-            <td><input value="${formatFraction(p.width)}" onchange="updatePart(${p.id},'width',parseFraction(this.value))"></td>
-            <td><input value="${formatFraction(p.height)}" onchange="updatePart(${p.id},'height',parseFraction(this.value))"></td>
+            <td><input value="${formatDimension(p.width)}" onchange="updatePart(${p.id},'width',parseDimension(this.value))"></td>
+            <td><input value="${formatDimension(p.height)}" onchange="updatePart(${p.id},'height',parseDimension(this.value))"></td>
             <td><select onchange="updatePart(${p.id},'type',this.value)">
                 <option ${p.type==='door'?'selected':''}>door</option>
                 <option ${p.type==='drawer'?'selected':''}>drawer</option>
@@ -368,7 +375,7 @@ function updateStats() {
 function populatePreviewSelect() {
     const select = document.getElementById('preview-select');
     select.innerHTML = parts.length ? parts.map(p => 
-        `<option value="${p.id}">${p.name} (${formatFraction(p.width)} × ${formatFraction(p.height)})</option>`
+        `<option value="${p.id}">${p.name} (${formatDimension(p.width)} × ${formatDimension(p.height)})</option>`
     ).join('') : '<option>No parts</option>';
 }
 
@@ -437,6 +444,7 @@ function getJobData() {
         hingeOID: selectedHingeOID,
         hingeTemplate: document.getElementById('hinge-template').value,
         materialThickness: document.getElementById('material-thickness').value,
+        displayUnits: displayUnits,
         parts: parts
     };
 }
@@ -450,6 +458,10 @@ function setJobData(data) {
     if (data.hingeOID) selectHinge(data.hingeOID);
     if (data.hingeTemplate) document.getElementById('hinge-template').value = data.hingeTemplate;
     if (data.materialThickness) document.getElementById('material-thickness').value = data.materialThickness;
+    if (data.displayUnits) {
+        displayUnits = data.displayUnits;
+        document.getElementById('display-units').value = displayUnits;
+    }
     
     parts = data.parts || [];
     renderParts();
@@ -522,8 +534,8 @@ function printCutList() {
                 <tr>
                     <td>${i + 1}</td>
                     <td>${p.name}</td>
-                    <td>${formatFraction(p.width)}</td>
-                    <td>${formatFraction(p.height)}</td>
+                    <td>${formatDimension(p.width)}</td>
+                    <td>${formatDimension(p.height)}</td>
                     <td>${p.type}</td>
                     <td>${(p.width * p.height).toFixed(1)}</td>
                 </tr>
@@ -616,12 +628,12 @@ function updatePreview() {
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
         ctx.setLineDash([]);
-        ctx.fillText(formatFraction(part.width), ox + W/2, oy - 15);
+        ctx.fillText(formatDimension(part.width), ox + W/2, oy - 15);
         
         ctx.save();
         ctx.translate(ox - 15, oy + H/2);
         ctx.rotate(-Math.PI/2);
-        ctx.fillText(formatFraction(part.height), 0, 0);
+        ctx.fillText(formatDimension(part.height), 0, 0);
         ctx.restore();
         
         // Hole callouts
@@ -769,6 +781,20 @@ function zoomOut() { zoomLevel = Math.max(zoomLevel / 1.25, 0.25); updatePreview
 function resetZoom() { zoomLevel = 1; panOffset = { x: 0, y: 0 }; updatePreview(); }
 
 // === FORMATTING ===
+function formatDimension(inches) {
+    if (inches === undefined || inches === null || isNaN(inches)) return '0';
+    
+    switch (displayUnits) {
+        case 'metric':
+            return (inches * 25.4).toFixed(1) + 'mm';
+        case 'decimal':
+            return inches.toFixed(3).replace(/\.?0+$/, '') + '"';
+        case 'fraction':
+        default:
+            return formatFraction(inches);
+    }
+}
+
 function formatFraction(d) {
     if (d < 0) return '-' + formatFraction(-d);
     const w = Math.floor(d);
@@ -791,6 +817,34 @@ function parseFraction(s) {
         const [n, d] = s.split('/'); 
         return parseFloat(n) / parseFloat(d); 
     }
+    return parseFloat(s) || 0;
+}
+
+function parseDimension(s) {
+    if (!s) return 0;
+    s = String(s).trim();
+    
+    // Metric (mm)
+    if (s.toLowerCase().includes('mm')) {
+        return parseFloat(s) / 25.4;
+    }
+    
+    // Remove inch symbol
+    s = s.replace(/"/g, '').trim();
+    
+    // Fraction (15-1/2)
+    if (s.includes('-') && s.includes('/')) {
+        const parts = s.split('-');
+        return parseInt(parts[0]) + parseFraction(parts[1]);
+    }
+    
+    // Just fraction (1/2)
+    if (s.includes('/')) {
+        const [n, d] = s.split('/');
+        return parseFloat(n) / parseFloat(d);
+    }
+    
+    // Decimal
     return parseFloat(s) || 0;
 }
 
@@ -831,7 +885,7 @@ function generateDXF(list) {
         
         dxf += '0\nENDSEC\n0\nEOF\n';
         
-        const filename = `${jobNum}_${part.name.replace(/\s+/g, '_')}_${formatFraction(part.width)}x${formatFraction(part.height)}.dxf`.replace(/"/g, '');
+        const filename = `${jobNum}_${part.name.replace(/\s+/g, '_')}_${formatDimension(part.width)}x${formatDimension(part.height)}.dxf`.replace(/"/g, '').replace(/mm/g, '');
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
         a.download = filename;
