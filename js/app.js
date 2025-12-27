@@ -59,8 +59,16 @@ function onMouseDown(e) {
 }
 
 function onMouseMove(e) {
-    if (!isPanning) return;
     const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Update cursor position in measure mode
+    if (measureMode) {
+        updateCursorPosition(x, y);
+    }
+    
+    if (!isPanning) return;
     panOffset.x = e.clientX - rect.left - panStart.x;
     panOffset.y = e.clientY - rect.top - panStart.y;
     drawPreview();
@@ -82,23 +90,65 @@ function doMeasure(x, y) {
     const t = previewTransform;
     if (!t.scale) return;
     
+    const part = parts.find(p => p.id == document.getElementById('preview-select').value);
+    if (!part) return;
+    
     // Convert screen coords to part coords
     let px = (x - t.ox) / t.scale;
     let py = t.ph - (y - t.oy) / t.scale;
     
-    // Get current part and holes
-    const part = parts.find(p => p.id == document.getElementById('preview-select').value);
-    if (!part) return;
+    // Get snap point
+    const snap = getSnapPoint(px, py, part);
+    px = snap.x;
+    py = snap.y;
     
+    if (!measureStart) {
+        // First point
+        measureStart = { x: px, y: py, label: snap.label };
+        document.getElementById('m-pt1').textContent = 'X: ' + px.toFixed(4) + '  Y: ' + py.toFixed(4);
+        document.getElementById('m-pt1').parentElement.querySelector('label').textContent = 'Point 1 (' + snap.label + '):';
+        document.getElementById('m-pt2').textContent = '—';
+        document.getElementById('m-distance').textContent = '—';
+        document.getElementById('m-angle').textContent = '—';
+        document.getElementById('m-dx').textContent = '—';
+        document.getElementById('m-dy').textContent = '—';
+    } else {
+        // Second point - calculate all measurements
+        measureStart.endX = px;
+        measureStart.endY = py;
+        measureStart.endLabel = snap.label;
+        
+        const dx = px - measureStart.x;
+        const dy = py - measureStart.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        measureStart.dist = dist;
+        measureStart.angle = angle;
+        measureStart.dx = Math.abs(dx);
+        measureStart.dy = Math.abs(dy);
+        
+        // Update panel
+        document.getElementById('m-distance').innerHTML = '<b>' + dist.toFixed(4) + '</b> in <span style="color:#888">(' + (dist * 25.4).toFixed(2) + ' mm)</span>';
+        document.getElementById('m-angle').textContent = angle.toFixed(3) + '°';
+        document.getElementById('m-dx').textContent = Math.abs(dx).toFixed(4) + ' in';
+        document.getElementById('m-dy').textContent = Math.abs(dy).toFixed(4) + ' in';
+        document.getElementById('m-pt2').textContent = 'X: ' + px.toFixed(4) + '  Y: ' + py.toFixed(4);
+        document.getElementById('m-pt2').parentElement.querySelector('label').textContent = 'Point 2 (' + snap.label + '):';
+        
+        drawPreview();
+    }
+    drawPreview();
+}
+
+function getSnapPoint(px, py, part) {
     const hingeSide = part.hingeSide || document.getElementById('hinge-side').value;
     const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
     const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
     
-    // Snap detection with SMALL distances
     let snapX = px, snapY = py, snapLabel = 'Point';
-    let foundHole = false;
     
-    // 1. Check holes first - 0.5" snap radius (about 12mm)
+    // Check holes first - 0.5" snap radius
     const holeSnap = 0.5;
     let closestDist = holeSnap;
     
@@ -108,13 +158,12 @@ function doMeasure(x, y) {
             closestDist = d;
             snapX = h.x;
             snapY = h.y;
-            snapLabel = h.isCup ? 'Cup' : 'Pilot';
-            foundHole = true;
+            snapLabel = h.isCup ? 'Cup Center' : 'Pilot Center';
         }
     }
     
-    // 2. If no hole, check edges - 0.4" snap
-    if (!foundHole) {
+    // If no hole, check edges - 0.4" snap
+    if (snapLabel === 'Point') {
         const edgeSnap = 0.4;
         if (px < edgeSnap && py >= 0 && py <= part.height) {
             snapX = 0; snapLabel = 'Left Edge';
@@ -127,36 +176,36 @@ function doMeasure(x, y) {
         }
     }
     
-    if (!measureStart) {
-        measureStart = { x: snapX, y: snapY, label: snapLabel };
-        document.getElementById('btn-measure').textContent = '📏 Pt 2';
-        document.getElementById('measure-result').innerHTML = '<b>' + snapLabel + '</b> → Click 2nd point';
-    } else {
-        const dx = snapX - measureStart.x;
-        const dy = snapY - measureStart.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        measureStart.endX = snapX;
-        measureStart.endY = snapY;
-        measureStart.endLabel = snapLabel;
-        measureStart.dist = dist;
-        
-        document.getElementById('measure-result').innerHTML = 
-            '<b>' + measureStart.label + '</b> → <b>' + snapLabel + '</b>: ' +
-            '<span style="color:#22d3ee;font-size:16px;font-weight:bold">' + (dist * 25.4).toFixed(2) + ' mm</span> (' + formatDim(dist) + ')';
-        
-        drawPreview();
-        
-        setTimeout(() => {
-            measureStart = null;
-            measureMode = false;
-            document.getElementById('btn-measure').textContent = '📏 Measure';
-            document.getElementById('btn-measure').classList.remove('active');
-            canvas.style.cursor = 'grab';
-            document.getElementById('measure-result').textContent = 'Drag to pan • Scroll to zoom';
-            drawPreview();
-        }, 6000);
-        return;
-    }
+    // Update snap indicator
+    document.getElementById('m-snap').textContent = snapLabel;
+    
+    return { x: snapX, y: snapY, label: snapLabel };
+}
+
+function updateCursorPosition(screenX, screenY) {
+    const t = previewTransform;
+    if (!t.scale) return;
+    
+    const part = parts.find(p => p.id == document.getElementById('preview-select').value);
+    if (!part) return;
+    
+    // Convert to part coords
+    const px = (screenX - t.ox) / t.scale;
+    const py = t.ph - (screenY - t.oy) / t.scale;
+    
+    // Get snap info
+    const snap = getSnapPoint(px, py, part);
+    
+    document.getElementById('m-cursor').textContent = 'X: ' + snap.x.toFixed(4) + '  Y: ' + snap.y.toFixed(4);
+}
+
+function closeMeasurePanel() {
+    measureMode = false;
+    measureStart = null;
+    document.getElementById('measure-panel').style.display = 'none';
+    document.getElementById('btn-measure').classList.remove('active');
+    document.getElementById('btn-measure').textContent = '📏 Measure';
+    canvas.style.cursor = 'grab';
     drawPreview();
 }
 
@@ -571,18 +620,17 @@ function drawPreview() {
         }
     }
     
-    // Draw measurement line if active
+    // Draw measurement line if active (Cabinet Vision style - thin red dashed)
     if (measureStart) {
         const sx = ox + measureStart.x * scale;
         const sy = oy + (part.height - measureStart.y) * scale;
         
-        // Start point - cyan
+        // Start point - small red crosshair
+        ctx.strokeStyle = '#cc0000';
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = '#22d3ee';
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
+        ctx.moveTo(sx - 6, sy); ctx.lineTo(sx + 6, sy);
+        ctx.moveTo(sx, sy - 6); ctx.lineTo(sx, sy + 6);
         ctx.stroke();
         
         // If we have end point
@@ -590,35 +638,21 @@ function drawPreview() {
             const ex = ox + measureStart.endX * scale;
             const ey = oy + (part.height - measureStart.endY) * scale;
             
-            // Line
+            // Thin red dashed line
             ctx.beginPath();
             ctx.moveTo(sx, sy);
             ctx.lineTo(ex, ey);
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = '#cc0000';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 3]);
             ctx.stroke();
             ctx.setLineDash([]);
             
-            // End point - purple
+            // End point - small red crosshair
             ctx.beginPath();
-            ctx.arc(ex, ey, 6, 0, Math.PI * 2);
-            ctx.fillStyle = '#a855f7';
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
+            ctx.moveTo(ex - 6, ey); ctx.lineTo(ex + 6, ey);
+            ctx.moveTo(ex, ey - 6); ctx.lineTo(ex, ey + 6);
             ctx.stroke();
-            
-            // Distance label
-            const mx = (sx + ex) / 2;
-            const my = (sy + ey) / 2;
-            const label = (measureStart.dist * 25.4).toFixed(2) + ' mm';
-            ctx.fillStyle = 'rgba(0,0,0,0.8)';
-            ctx.fillRect(mx - 35, my - 10, 70, 20);
-            ctx.fillStyle = '#22d3ee';
-            ctx.font = 'bold 12px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(label, mx, my + 4);
         }
     }
     

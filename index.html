@@ -183,6 +183,50 @@
                         <div class="measure-result" id="measure-result">Drag to pan • Scroll to zoom</div>
                     </div>
                 </div>
+                
+                <!-- Measure Panel -->
+                <div class="measure-panel" id="measure-panel" style="display:none;">
+                    <div class="measure-panel-header">
+                        <span>📏 Measure / Inspect</span>
+                        <button onclick="closeMeasurePanel()" class="measure-close">×</button>
+                    </div>
+                    <div class="measure-panel-body">
+                        <div class="measure-row">
+                            <label>Distance:</label>
+                            <span id="m-distance">—</span>
+                        </div>
+                        <div class="measure-row">
+                            <label>Angle:</label>
+                            <span id="m-angle">—</span>
+                        </div>
+                        <div class="measure-row">
+                            <label>X Distance:</label>
+                            <span id="m-dx">—</span>
+                        </div>
+                        <div class="measure-row">
+                            <label>Y Distance:</label>
+                            <span id="m-dy">—</span>
+                        </div>
+                        <hr>
+                        <div class="measure-row">
+                            <label>Point 1:</label>
+                            <span id="m-pt1">—</span>
+                        </div>
+                        <div class="measure-row">
+                            <label>Point 2:</label>
+                            <span id="m-pt2">—</span>
+                        </div>
+                        <hr>
+                        <div class="measure-row">
+                            <label>Cursor:</label>
+                            <span id="m-cursor">—</span>
+                        </div>
+                        <div class="measure-row snap-indicator" id="m-snap-row">
+                            <label>Snap:</label>
+                            <span id="m-snap">None</span>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <!-- Right Panel - Parts List -->

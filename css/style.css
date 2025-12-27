@@ -1,3 +1,68 @@
+/* Measure Panel - Cabinet Vision Style */
+.measure-panel {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 220px;
+    background: #f8f9fa;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 2px 2px 8px rgba(0,0,0,0.2);
+    z-index: 100;
+    font-size: 12px;
+}
+.measure-panel-header {
+    background: linear-gradient(to bottom, #e8e8e8, #d0d0d0);
+    padding: 6px 10px;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #bbb;
+}
+.measure-close {
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: #666;
+    padding: 0 4px;
+}
+.measure-close:hover { color: #c00; }
+.measure-panel-body {
+    padding: 8px 10px;
+    background: #fff;
+}
+.measure-panel-body hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 6px 0;
+}
+.measure-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 0;
+    font-family: 'Segoe UI', sans-serif;
+}
+.measure-row label {
+    color: #555;
+    font-weight: 500;
+}
+.measure-row span {
+    color: #000;
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+}
+.measure-row.snap-indicator span {
+    color: #0066cc;
+    font-weight: bold;
+}
+.measure-highlight {
+    background: #ffffcc;
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+
 :root {
     --primary: #2563eb;
     --primary-dark: #1d4ed8;
