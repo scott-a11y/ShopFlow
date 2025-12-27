@@ -81,22 +81,41 @@ function onWheel(e) {
 function doMeasure(x, y) {
     const t = previewTransform;
     if (!t.scale) return;
+    
+    // Convert screen coords to part coords
     const px = (x - t.ox) / t.scale;
     const py = t.ph - (y - t.oy) / t.scale;
     
     if (!measureStart) {
-        measureStart = { x: px, y: py };
-        document.getElementById('measure-result').textContent = 'Click second point...';
+        measureStart = { x: px, y: py, sx: x, sy: y };
+        document.getElementById('btn-measure').textContent = '📏 End Pt';
+        document.getElementById('measure-result').innerHTML = '<b>Start:</b> ' + formatDim(px) + ' x ' + formatDim(py) + ' - Click second point...';
     } else {
         const dx = px - measureStart.x;
         const dy = py - measureStart.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
+        measureStart.ex = x;
+        measureStart.ey = y;
+        measureStart.endX = px;
+        measureStart.endY = py;
+        measureStart.dist = dist;
+        
         document.getElementById('measure-result').innerHTML = 
-            '<b>Distance:</b> ' + formatDim(dist) + ' (' + (dist*25.4).toFixed(1) + 'mm)';
-        measureStart = null;
-        measureMode = false;
-        document.getElementById('btn-measure').classList.remove('active');
-        canvas.style.cursor = 'grab';
+            '<b>Distance:</b> ' + formatDim(dist) + ' (' + (dist*25.4).toFixed(1) + 'mm) | ' +
+            '<b>ΔX:</b> ' + formatDim(Math.abs(dx)) + ' | <b>ΔY:</b> ' + formatDim(Math.abs(dy));
+        
+        drawPreview();
+        
+        // Reset after 5 seconds
+        setTimeout(() => {
+            measureStart = null;
+            measureMode = false;
+            document.getElementById('btn-measure').textContent = '📏 Measure';
+            document.getElementById('btn-measure').classList.remove('active');
+            canvas.style.cursor = 'grab';
+            drawPreview();
+        }, 5000);
+        return;
     }
     drawPreview();
 }
@@ -323,6 +342,8 @@ function saveJob() {
         hingeOID: selectedHingeOID,
         hingeSide: document.getElementById('hinge-side').value,
         hingeCount: document.getElementById('hinge-count').value,
+        bottomHinge: document.getElementById('bottom-hinge').value,
+        topHinge: document.getElementById('top-hinge').value,
         displayUnits: displayUnits,
         parts: parts
     };
@@ -351,6 +372,8 @@ function loadJob() {
                     if (data.hingeOID) selectHinge(data.hingeOID);
                     if (data.hingeSide) document.getElementById('hinge-side').value = data.hingeSide;
                     if (data.hingeCount) document.getElementById('hinge-count').value = data.hingeCount;
+                    if (data.bottomHinge) document.getElementById('bottom-hinge').value = data.bottomHinge;
+                    if (data.topHinge) document.getElementById('top-hinge').value = data.topHinge;
                     if (data.displayUnits) {
                         displayUnits = data.displayUnits;
                         document.getElementById('display-units').value = displayUnits;
@@ -487,6 +510,60 @@ function drawPreview() {
         }
     }
     
+    // Draw measurement line if active
+    if (measureStart) {
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        
+        // Start point
+        const sx = ox + measureStart.x * scale;
+        const sy = oy + (part.height - measureStart.y) * scale;
+        
+        ctx.beginPath();
+        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#06b6d4';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.stroke();
+        
+        // If we have end point, draw line
+        if (measureStart.endX !== undefined) {
+            const ex = ox + measureStart.endX * scale;
+            const ey = oy + (part.height - measureStart.endY) * scale;
+            
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(ex, ey);
+            ctx.strokeStyle = '#06b6d4';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // End point
+            ctx.beginPath();
+            ctx.arc(ex, ey, 6, 0, Math.PI * 2);
+            ctx.fillStyle = '#06b6d4';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Distance label at midpoint
+            const mx = (sx + ex) / 2;
+            const my = (sy + ey) / 2;
+            ctx.fillStyle = 'rgba(6, 182, 212, 0.9)';
+            ctx.fillRect(mx - 40, my - 12, 80, 24);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText((measureStart.dist * 25.4).toFixed(1) + ' mm', mx, my + 4);
+        }
+    }
+    
     // Legend
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, H - 30, W, 30);
@@ -512,17 +589,34 @@ function drawPreview() {
 
 function getHingeHoles(part, hingeSide, hingeCount) {
     const holes = [];
-    const cupX = 22.5 / 25.4;
-    const pilotX = 32 / 25.4;
-    const cupD = 35 / 25.4;
-    const pilotD = 8 / 25.4;
-    const pilotOffset = 22.5 / 25.4;
+    const cupX = 22.5 / 25.4;  // Cup setback from edge
+    const pilotX = 32 / 25.4;  // Pilot setback from edge
+    const cupD = 35 / 25.4;    // 35mm cup diameter
+    const pilotD = 8 / 25.4;   // 8mm pilot diameter
+    const pilotOffset = 22.5 / 25.4;  // Pilot offset from cup center
     
-    // Y positions
-    let yPos = [3, part.height - 3];
-    if (hingeCount >= 3) yPos.push(part.height / 2);
+    // Get bottom/top hinge positions from inputs
+    const bottomInset = parseDim(document.getElementById('bottom-hinge').value) || 3;
+    const topInset = parseDim(document.getElementById('top-hinge').value) || 3;
+    
+    // Y positions based on hinge count
+    const bottomY = bottomInset;
+    const topY = part.height - topInset;
+    let yPos = [bottomY, topY];
+    
+    if (hingeCount >= 3) {
+        // Add middle hinge
+        yPos.push((bottomY + topY) / 2);
+    }
     if (hingeCount >= 4) {
-        yPos = [3, part.height * 0.33, part.height * 0.67, part.height - 3];
+        // Evenly space 4 hinges
+        const span = topY - bottomY;
+        yPos = [
+            bottomY,
+            bottomY + span / 3,
+            bottomY + span * 2 / 3,
+            topY
+        ];
     }
     
     const sides = hingeSide === 'both' ? ['left', 'right'] : [hingeSide];

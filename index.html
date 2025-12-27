@@ -109,9 +109,13 @@
                             <label>Vertical Template</label>
                             <select id="hinge-template" onchange="updateHingeTemplate()"></select>
                         </div>
-                        <div class="template-info">
-                            <div><strong>Bottom:</strong> <span id="bottom-hinge">3"</span></div>
-                            <div><strong>Top:</strong> <span id="top-hinge">[top]-3"</span></div>
+                        <div class="form-group">
+                            <label>Bottom Hinge (from bottom)</label>
+                            <input type="text" id="bottom-hinge" value="3" onchange="drawPreview()" placeholder="3">
+                        </div>
+                        <div class="form-group">
+                            <label>Top Hinge (from top)</label>
+                            <input type="text" id="top-hinge" value="3" onchange="drawPreview()" placeholder="3">
                         </div>
                         <div class="form-group" style="margin-top:0.5rem;">
                             <label>Number of Hinges</label>
