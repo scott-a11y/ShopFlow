@@ -208,7 +208,9 @@ function renderParts() {
         '<td><select onchange="updatePart(' + p.id + ',\'hingeSide\',this.value)">' +
             '<option value="left"' + (p.hingeSide === 'left' ? ' selected' : '') + '>L</option>' +
             '<option value="right"' + (p.hingeSide === 'right' ? ' selected' : '') + '>R</option>' +
-            '<option value="both"' + (p.hingeSide === 'both' ? ' selected' : '') + '>LR</option></select></td>' +
+            '<option value="both"' + (p.hingeSide === 'both' ? ' selected' : '') + '>LR</option>' +
+            '<option value="top"' + (p.hingeSide === 'top' ? ' selected' : '') + '>T</option>' +
+            '<option value="bottom"' + (p.hingeSide === 'bottom' ? ' selected' : '') + '>B</option></select></td>' +
         '<td><button class="btn-delete" onclick="removePart(' + p.id + ')">×</button></td>' +
         '</tr>'
     ).join('');
@@ -484,7 +486,7 @@ function drawPreview() {
         ctx.stroke();
     });
     
-    // Dimensions
+    // Dimensions and door name
     if (showDimensions) {
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 14px sans-serif';
@@ -497,16 +499,35 @@ function drawPreview() {
         ctx.fillText(formatDim(part.height), 0, 0);
         ctx.restore();
         
+        // LARGE door name in center
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.textAlign = 'center';
+        ctx.fillText(part.name, ox + pw / 2, oy + ph / 2 - 10);
+        
+        // Part dimensions below name
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText(formatDim(part.width) + ' x ' + formatDim(part.height), ox + pw / 2, oy + ph / 2 + 10);
+        
         // Hinge side label
         ctx.font = '12px sans-serif';
         ctx.fillStyle = '#fbbf24';
         if (hingeSide === 'left' || hingeSide === 'both') {
             ctx.textAlign = 'left';
-            ctx.fillText('HINGE', ox + 5, oy + ph - 10);
+            ctx.fillText('◀ HINGE', ox + 5, oy + ph / 2);
         }
         if (hingeSide === 'right' || hingeSide === 'both') {
             ctx.textAlign = 'right';
-            ctx.fillText('HINGE', ox + pw - 5, oy + ph - 10);
+            ctx.fillText('HINGE ▶', ox + pw - 5, oy + ph / 2);
+        }
+        if (hingeSide === 'top') {
+            ctx.textAlign = 'center';
+            ctx.fillText('▲ HINGE', ox + pw / 2, oy + 15);
+        }
+        if (hingeSide === 'bottom') {
+            ctx.textAlign = 'center';
+            ctx.fillText('HINGE ▼', ox + pw / 2, oy + ph - 8);
         }
     }
     
@@ -589,48 +610,75 @@ function drawPreview() {
 
 function getHingeHoles(part, hingeSide, hingeCount) {
     const holes = [];
-    const cupX = 22.5 / 25.4;  // Cup setback from edge
-    const pilotX = 32 / 25.4;  // Pilot setback from edge
     const cupD = 35 / 25.4;    // 35mm cup diameter
     const pilotD = 8 / 25.4;   // 8mm pilot diameter
     const pilotOffset = 22.5 / 25.4;  // Pilot offset from cup center
     
-    // Get bottom/top hinge positions from inputs
+    // Get inset positions from inputs
     const bottomInset = parseDim(document.getElementById('bottom-hinge').value) || 3;
     const topInset = parseDim(document.getElementById('top-hinge').value) || 3;
     
-    // Y positions based on hinge count
-    const bottomY = bottomInset;
-    const topY = part.height - topInset;
-    let yPos = [bottomY, topY];
+    // Check if horizontal (top/bottom) or vertical (left/right) hinges
+    const isHorizontal = (hingeSide === 'top' || hingeSide === 'bottom');
     
-    if (hingeCount >= 3) {
-        // Add middle hinge
-        yPos.push((bottomY + topY) / 2);
-    }
-    if (hingeCount >= 4) {
-        // Evenly space 4 hinges
-        const span = topY - bottomY;
-        yPos = [
-            bottomY,
-            bottomY + span / 3,
-            bottomY + span * 2 / 3,
-            topY
-        ];
-    }
-    
-    const sides = hingeSide === 'both' ? ['left', 'right'] : [hingeSide];
-    
-    sides.forEach(side => {
-        yPos.forEach(y => {
-            const cx = side === 'right' ? part.width - cupX : cupX;
-            const px = side === 'right' ? part.width - pilotX : pilotX;
-            
-            holes.push({ x: cx, y: y, dia: cupD, isCup: true });
-            holes.push({ x: px, y: y - pilotOffset, dia: pilotD, isCup: false });
-            holes.push({ x: px, y: y + pilotOffset, dia: pilotD, isCup: false });
+    if (isHorizontal) {
+        // Horizontal hinges (top or bottom of door)
+        const cupY = 22.5 / 25.4;  // Cup setback from edge
+        const pilotY = 32 / 25.4;  // Pilot setback from edge
+        
+        // X positions for hinges along width
+        const leftX = bottomInset;  // Using bottomInset as left inset
+        const rightX = part.width - topInset;  // Using topInset as right inset
+        let xPos = [leftX, rightX];
+        
+        if (hingeCount >= 3) {
+            xPos.push((leftX + rightX) / 2);
+        }
+        if (hingeCount >= 4) {
+            const span = rightX - leftX;
+            xPos = [leftX, leftX + span/3, leftX + span*2/3, rightX];
+        }
+        
+        const edgeY = hingeSide === 'top' ? part.height : 0;
+        const cupYPos = hingeSide === 'top' ? part.height - cupY : cupY;
+        const pilotYPos = hingeSide === 'top' ? part.height - pilotY : pilotY;
+        
+        xPos.forEach(x => {
+            holes.push({ x: x, y: cupYPos, dia: cupD, isCup: true });
+            holes.push({ x: x - pilotOffset, y: pilotYPos, dia: pilotD, isCup: false });
+            holes.push({ x: x + pilotOffset, y: pilotYPos, dia: pilotD, isCup: false });
         });
-    });
+    } else {
+        // Vertical hinges (left/right side of door)
+        const cupX = 22.5 / 25.4;  // Cup setback from edge
+        const pilotX = 32 / 25.4;  // Pilot setback from edge
+        
+        // Y positions based on hinge count
+        const bottomY = bottomInset;
+        const topY = part.height - topInset;
+        let yPos = [bottomY, topY];
+        
+        if (hingeCount >= 3) {
+            yPos.push((bottomY + topY) / 2);
+        }
+        if (hingeCount >= 4) {
+            const span = topY - bottomY;
+            yPos = [bottomY, bottomY + span/3, bottomY + span*2/3, topY];
+        }
+        
+        const sides = hingeSide === 'both' ? ['left', 'right'] : [hingeSide];
+        
+        sides.forEach(side => {
+            yPos.forEach(y => {
+                const cx = side === 'right' ? part.width - cupX : cupX;
+                const px = side === 'right' ? part.width - pilotX : pilotX;
+                
+                holes.push({ x: cx, y: y, dia: cupD, isCup: true });
+                holes.push({ x: px, y: y - pilotOffset, dia: pilotD, isCup: false });
+                holes.push({ x: px, y: y + pilotOffset, dia: pilotD, isCup: false });
+            });
+        });
+    }
     
     return holes;
 }
