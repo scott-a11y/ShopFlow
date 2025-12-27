@@ -88,92 +88,141 @@ function doMeasure(x, y) {
     
     // Get current part and holes
     const part = parts.find(p => p.id == document.getElementById('preview-select').value);
-    if (part) {
-        const hingeSide = part.hingeSide || document.getElementById('hinge-side').value;
-        const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
-        const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
-        
-        const snapRadius = 1.5; // inches
-        let snapped = false;
-        
-        // First check if clicking near an EDGE (within snapRadius of edge line)
-        // Left edge
-        if (px < snapRadius && py >= 0 && py <= part.height) {
-            px = 0;
-            py = Math.max(0, Math.min(part.height, py));
-            snapped = true;
-        }
-        // Right edge
-        else if (px > part.width - snapRadius && py >= 0 && py <= part.height) {
-            px = part.width;
-            py = Math.max(0, Math.min(part.height, py));
-            snapped = true;
-        }
-        // Bottom edge
-        else if (py < snapRadius && px >= 0 && px <= part.width) {
-            py = 0;
-            px = Math.max(0, Math.min(part.width, px));
-            snapped = true;
-        }
-        // Top edge
-        else if (py > part.height - snapRadius && px >= 0 && px <= part.width) {
-            py = part.height;
-            px = Math.max(0, Math.min(part.width, px));
-            snapped = true;
-        }
-        
-        // If not on edge, check holes
-        if (!snapped) {
-            let nearestDist = Infinity;
-            let nearestHole = null;
-            
-            holes.forEach(h => {
-                const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
-                if (dist < nearestDist && dist < snapRadius) {
-                    nearestDist = dist;
-                    nearestHole = h;
-                }
-            });
-            
-            if (nearestHole) {
-                px = nearestHole.x;
-                py = nearestHole.y;
-            }
-        }
-    }
+    if (!part) return;
+    
+    const hingeSide = part.hingeSide || document.getElementById('hinge-side').value;
+    const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
+    const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
+    
+    // Snap detection
+    const snapResult = findSnapPoint(px, py, part, holes);
+    px = snapResult.x;
+    py = snapResult.y;
     
     if (!measureStart) {
-        measureStart = { x: px, y: py, sx: x, sy: y };
+        measureStart = { 
+            x: px, y: py, 
+            type: snapResult.type,
+            label: snapResult.label
+        };
         document.getElementById('btn-measure').textContent = '📏 End Pt';
-        document.getElementById('measure-result').innerHTML = '<b>Start:</b> ' + formatDim(px) + ' x ' + formatDim(py) + ' - Click second point...';
+        document.getElementById('measure-result').innerHTML = 
+            '<span style="color:#22d3ee">⊙ ' + snapResult.label + '</span> → Click second point...';
     } else {
         const dx = px - measureStart.x;
         const dy = py - measureStart.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        measureStart.ex = x;
-        measureStart.ey = y;
+        
         measureStart.endX = px;
         measureStart.endY = py;
+        measureStart.endType = snapResult.type;
+        measureStart.endLabel = snapResult.label;
         measureStart.dist = dist;
         
         document.getElementById('measure-result').innerHTML = 
-            '<b>Distance:</b> ' + formatDim(dist) + ' (' + (dist*25.4).toFixed(1) + 'mm) | ' +
-            '<b>ΔX:</b> ' + formatDim(Math.abs(dx)) + ' | <b>ΔY:</b> ' + formatDim(Math.abs(dy));
+            '<span style="color:#22d3ee">⊙ ' + measureStart.label + '</span> → ' +
+            '<span style="color:#a855f7">⊙ ' + snapResult.label + '</span><br>' +
+            '<b style="font-size:14px">Distance: ' + formatDim(dist) + ' (' + (dist*25.4).toFixed(2) + 'mm)</b> | ' +
+            'ΔX: ' + formatDim(Math.abs(dx)) + ' | ΔY: ' + formatDim(Math.abs(dy));
         
         drawPreview();
         
-        // Reset after 5 seconds
+        // Reset after 8 seconds
         setTimeout(() => {
             measureStart = null;
             measureMode = false;
             document.getElementById('btn-measure').textContent = '📏 Measure';
             document.getElementById('btn-measure').classList.remove('active');
             canvas.style.cursor = 'grab';
+            document.getElementById('measure-result').textContent = 'Drag to pan • Scroll to zoom';
             drawPreview();
-        }, 5000);
+        }, 8000);
         return;
     }
     drawPreview();
+}
+
+function findSnapPoint(px, py, part, holes) {
+    const snapRadius = 2.0; // inches
+    let best = { x: px, y: py, dist: Infinity, type: 'free', label: formatDim(px) + ', ' + formatDim(py) };
+    
+    // Priority 1: Hole centers (cups get higher priority than pilots)
+    holes.filter(h => h.isCup).forEach(h => {
+        const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
+        if (dist < best.dist && dist < snapRadius) {
+            best = { x: h.x, y: h.y, dist: dist, type: 'cup', 
+                label: 'Cup @ ' + formatDim(h.x) + ', ' + formatDim(h.y) };
+        }
+    });
+    
+    // Priority 2: Pilot holes
+    if (best.type === 'free') {
+        holes.filter(h => !h.isCup).forEach(h => {
+            const dist = Math.sqrt(Math.pow(px - h.x, 2) + Math.pow(py - h.y, 2));
+            if (dist < best.dist && dist < snapRadius) {
+                best = { x: h.x, y: h.y, dist: dist, type: 'pilot',
+                    label: 'Pilot @ ' + formatDim(h.x) + ', ' + formatDim(h.y) };
+            }
+        });
+    }
+    
+    // Priority 3: Corners
+    if (best.type === 'free') {
+        const corners = [
+            { x: 0, y: 0, label: 'Corner (BL)' },
+            { x: part.width, y: 0, label: 'Corner (BR)' },
+            { x: 0, y: part.height, label: 'Corner (TL)' },
+            { x: part.width, y: part.height, label: 'Corner (TR)' }
+        ];
+        corners.forEach(c => {
+            const dist = Math.sqrt(Math.pow(px - c.x, 2) + Math.pow(py - c.y, 2));
+            if (dist < best.dist && dist < snapRadius) {
+                best = { x: c.x, y: c.y, dist: dist, type: 'corner', label: c.label };
+            }
+        });
+    }
+    
+    // Priority 4: Edges
+    if (best.type === 'free') {
+        // Left edge
+        if (px < snapRadius && py >= 0 && py <= part.height) {
+            const dist = Math.abs(px);
+            if (dist < best.dist) {
+                const edgeY = Math.max(0, Math.min(part.height, py));
+                best = { x: 0, y: edgeY, dist: dist, type: 'edge',
+                    label: 'Left Edge @ Y=' + formatDim(edgeY) };
+            }
+        }
+        // Right edge
+        if (part.width - px < snapRadius && py >= 0 && py <= part.height) {
+            const dist = Math.abs(part.width - px);
+            if (dist < best.dist) {
+                const edgeY = Math.max(0, Math.min(part.height, py));
+                best = { x: part.width, y: edgeY, dist: dist, type: 'edge',
+                    label: 'Right Edge @ Y=' + formatDim(edgeY) };
+            }
+        }
+        // Bottom edge
+        if (py < snapRadius && px >= 0 && px <= part.width) {
+            const dist = Math.abs(py);
+            if (dist < best.dist) {
+                const edgeX = Math.max(0, Math.min(part.width, px));
+                best = { x: edgeX, y: 0, dist: dist, type: 'edge',
+                    label: 'Bottom Edge @ X=' + formatDim(edgeX) };
+            }
+        }
+        // Top edge
+        if (part.height - py < snapRadius && px >= 0 && px <= part.width) {
+            const dist = Math.abs(part.height - py);
+            if (dist < best.dist) {
+                const edgeX = Math.max(0, Math.min(part.width, px));
+                best = { x: edgeX, y: part.height, dist: dist, type: 'edge',
+                    label: 'Top Edge @ X=' + formatDim(edgeX) };
+            }
+        }
+    }
+    
+    return best;
 }
 
 async function loadDatabase() {
@@ -589,55 +638,93 @@ function drawPreview() {
     
     // Draw measurement line if active
     if (measureStart) {
-        ctx.strokeStyle = '#06b6d4';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 3]);
-        
-        // Start point
         const sx = ox + measureStart.x * scale;
         const sy = oy + (part.height - measureStart.y) * scale;
         
+        // Start point color based on type
+        const startColor = measureStart.type === 'cup' ? '#dc2626' : 
+                          measureStart.type === 'pilot' ? '#22c55e' : 
+                          measureStart.type === 'corner' ? '#f59e0b' : '#06b6d4';
+        
+        // Start point with glow
+        ctx.shadowColor = startColor;
+        ctx.shadowBlur = 10;
         ctx.beginPath();
-        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = '#06b6d4';
+        ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+        ctx.fillStyle = startColor;
         ctx.fill();
+        ctx.shadowBlur = 0;
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
-        ctx.setLineDash([]);
         ctx.stroke();
         
-        // If we have end point, draw line
+        // Start label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('1', sx, sy + 3);
+        
+        // If we have end point, draw line and end point
         if (measureStart.endX !== undefined) {
             const ex = ox + measureStart.endX * scale;
             const ey = oy + (part.height - measureStart.endY) * scale;
             
+            const endColor = measureStart.endType === 'cup' ? '#dc2626' : 
+                            measureStart.endType === 'pilot' ? '#22c55e' : 
+                            measureStart.endType === 'corner' ? '#f59e0b' : '#a855f7';
+            
+            // Measurement line
             ctx.beginPath();
             ctx.moveTo(sx, sy);
             ctx.lineTo(ex, ey);
-            ctx.strokeStyle = '#06b6d4';
+            ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
-            ctx.setLineDash([5, 3]);
+            ctx.setLineDash([8, 4]);
             ctx.stroke();
             ctx.setLineDash([]);
             
-            // End point
+            // End point with glow
+            ctx.shadowColor = endColor;
+            ctx.shadowBlur = 10;
             ctx.beginPath();
-            ctx.arc(ex, ey, 6, 0, Math.PI * 2);
-            ctx.fillStyle = '#06b6d4';
+            ctx.arc(ex, ey, 8, 0, Math.PI * 2);
+            ctx.fillStyle = endColor;
             ctx.fill();
+            ctx.shadowBlur = 0;
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.stroke();
             
+            // End label
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('2', ex, ey + 3);
+            
             // Distance label at midpoint
             const mx = (sx + ex) / 2;
             const my = (sy + ey) / 2;
-            ctx.fillStyle = 'rgba(6, 182, 212, 0.9)';
-            ctx.fillRect(mx - 40, my - 12, 80, 24);
+            const distText = (measureStart.dist * 25.4).toFixed(2) + ' mm';
+            const inchText = formatDim(measureStart.dist);
+            
+            // Background pill
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            const pillW = 120, pillH = 40;
+            ctx.beginPath();
+            ctx.roundRect(mx - pillW/2, my - pillH/2, pillW, pillH, 6);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            // Distance text
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 11px sans-serif';
+            ctx.font = 'bold 14px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText((measureStart.dist * 25.4).toFixed(1) + ' mm', mx, my + 4);
+            ctx.fillText(distText, mx, my - 5);
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText(inchText, mx, my + 12);
         }
     }
     
