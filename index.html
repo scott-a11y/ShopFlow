@@ -127,6 +127,17 @@
                                 <option value="4">4 Hinges</option>
                             </select>
                         </div>
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>Profile Toolpath</label>
+                            <select id="profile-tool" onchange="updatePreview()">
+                                <option value="Compression 0.5">Compression 0.5"</option>
+                                <option value="Compression 0.375">Compression 0.375"</option>
+                                <option value="End Mill 0.375 DC">End Mill 0.375" DC</option>
+                                <option value="End Mill 0.25 DC">End Mill 0.25" DC</option>
+                                <option value="End Mill 0.375 Rougher DC">Rougher 0.375"</option>
+                                <option value="End Mill 0.125 DC">End Mill 0.125" (small parts)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
                 
@@ -250,6 +261,7 @@
                                         <th style="width:60px;">H</th>
                                         <th style="width:65px;">Type</th>
                                         <th style="width:55px;">Side</th>
+                                        <th style="width:70px;">Profile</th>
                                         <th style="width:25px;"></th>
                                     </tr>
                                 </thead>

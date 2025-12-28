@@ -312,7 +312,8 @@ function renderParts() {
 function addPart() {
     const id = parts.length ? Math.max(...parts.map(p => p.id)) + 1 : 1;
     const side = document.getElementById('hinge-side').value || 'left';
-    parts.push({ id: id, name: 'Door ' + id, width: 15, height: 30, type: 'door', hingeSide: side, selected: true });
+    const profile = document.getElementById('profile-tool').value || 'Compression 0.5';
+    parts.push({ id: id, name: 'Door ' + id, width: 15, height: 30, type: 'door', hingeSide: side, profileTool: profile, selected: true });
     renderParts();
 }
 
@@ -433,6 +434,7 @@ function saveJob() {
         hingeOID: selectedHingeOID,
         hingeSide: document.getElementById('hinge-side').value,
         hingeCount: document.getElementById('hinge-count').value,
+        profileTool: document.getElementById('profile-tool').value,
         bottomHinge: document.getElementById('bottom-hinge').value,
         topHinge: document.getElementById('top-hinge').value,
         displayUnits: displayUnits,
@@ -463,6 +465,7 @@ function loadJob() {
                     if (data.hingeOID) selectHinge(data.hingeOID);
                     if (data.hingeSide) document.getElementById('hinge-side').value = data.hingeSide;
                     if (data.hingeCount) document.getElementById('hinge-count').value = data.hingeCount;
+                    if (data.profileTool) document.getElementById('profile-tool').value = data.profileTool;
                     if (data.bottomHinge) document.getElementById('bottom-hinge').value = data.bottomHinge;
                     if (data.topHinge) document.getElementById('top-hinge').value = data.topHinge;
                     if (data.displayUnits) {
@@ -832,22 +835,20 @@ function exportDXF(list) {
         const drillLayers = new Set();
         holes.forEach(h => { if (h.layer) drillLayers.add(h.layer); });
         
-        // All layers - drilling + profile options + engraving
+        // Get selected profile tool for this part
+        const profileTool = part.profileTool || 'Compression 0.5';
+        
+        // All layers - drilling + selected profile + engraving
         // Layer names match Aspire toolpath template file names
         const layers = [
             // Drilling layers (from hole data)
             ...Array.from(drillLayers).map(name => ({ name: name, color: 1 })),
             
-            // Profile/Cutout layers - multiple options for different tools
-            { name: 'Compression 0.5', color: 7 },       // Main profile cut
-            { name: 'Compression 0.375', color: 7 },     // Smaller compression
-            { name: 'End Mill 0.375 DC', color: 8 },     // Down cut end mill
-            { name: 'End Mill 0.25 DC', color: 8 },      // Fine detail
-            { name: 'End Mill 0.375 Rougher DC', color: 9 }, // Roughing pass
+            // Profile layer (selected per-part)
+            { name: profileTool, color: 7 },
             
             // Engraving
-            { name: 'Pencil', color: 4 },                // V-bit/pencil engraving
-            { name: 'End Mill 0.125 DC', color: 6 }      // Fine engraving
+            { name: 'Pencil', color: 4 }
         ];
         
         // DXF Header
@@ -872,15 +873,13 @@ function exportDXF(list) {
         // Entities section
         dxf += '0\nSECTION\n2\nENTITIES\n';
         
-        // Profile outline on MULTIPLE layers (user picks which to use in Aspire)
-        const profileLayers = ['Compression 0.5', 'Compression 0.375', 'End Mill 0.375 DC'];
-        profileLayers.forEach(layer => {
-            dxf += '0\nLWPOLYLINE\n8\n' + layer + '\n90\n4\n70\n1\n';
-            dxf += '10\n0\n20\n0\n';
-            dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
-            dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
-            dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
-        });
+        // Profile outline on selected layer only
+        const profileLayer = part.profileTool || 'Compression 0.5';
+        dxf += '0\nLWPOLYLINE\n8\n' + profileLayer + '\n90\n4\n70\n1\n';
+        dxf += '10\n0\n20\n0\n';
+        dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
+        dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
+        dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
         
         // Holes on their data-driven layers
         holes.forEach(h => {
