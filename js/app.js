@@ -312,7 +312,7 @@ function renderParts() {
 function addPart() {
     const id = parts.length ? Math.max(...parts.map(p => p.id)) + 1 : 1;
     const side = document.getElementById('hinge-side').value || 'left';
-    const profile = document.getElementById('profile-tool').value || 'Compression 0.5';
+    const profile = document.getElementById('profile-tool').value || 'Fast Cut';
     parts.push({ id: id, name: 'Door ' + id, width: 15, height: 30, type: 'door', hingeSide: side, profileTool: profile, selected: true });
     renderParts();
 }
