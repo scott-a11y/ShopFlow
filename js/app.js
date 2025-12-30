@@ -827,87 +827,84 @@ function exportDXF(list) {
     const job = document.getElementById('job-number').value || 'job';
     const hingeCount = parseInt(document.getElementById('hinge-count').value) || 2;
     
+    // CabinetSense layer names from database
+    const CS_LAYERS = {
+        fastCut: 'Fast Cut',
+        slowCut: 'Slow Cut',
+        microCut: 'Micro Cut',
+        mediumCut: 'Medium Cut',
+        label: 'Label'
+    };
+    
     list.forEach(part => {
         const hingeSide = part.hingeSide || 'left';
         const holes = part.type === 'door' ? getHingeHoles(part, hingeSide, hingeCount) : [];
+        const thickness = 0.75;
         
-        // Collect unique drill layers from hole data
-        const drillLayers = new Set();
-        holes.forEach(h => { if (h.layer) drillLayers.add(h.layer); });
+        // Profile layer directly from dropdown (now uses CabinetSense names)
+        const profileLayer = part.profileTool || CS_LAYERS.fastCut;
         
-        // Get selected profile tool for this part
-        const profileTool = part.profileTool || 'Compression 0.5';
-        
-        // All layers - drilling + selected profile + engraving
-        // Layer names match Aspire toolpath template file names
-        const layers = [
-            // Drilling layers (from hole data)
-            ...Array.from(drillLayers).map(name => ({ name: name, color: 1 })),
-            
-            // Profile layer (selected per-part)
-            { name: profileTool, color: 7 },
-            
-            // Engraving
-            { name: 'Pencil', color: 4 }
-        ];
-        
-        // DXF Header
-        let dxf = '0\nSECTION\n2\nHEADER\n';
-        dxf += '9\n$ACADVER\n1\nAC1015\n';
-        dxf += '9\n$INSUNITS\n70\n1\n';
-        dxf += '0\nENDSEC\n';
-        
-        // Tables - Layers
-        dxf += '0\nSECTION\n2\nTABLES\n';
-        dxf += '0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
-        layers.forEach(l => {
-            // Color coding: drills=red/green, profile=white/gray, engrave=cyan
-            let color = l.color;
-            if (l.name.includes('35')) color = 1;      // Red - 35mm
-            else if (l.name.includes('8mm')) color = 3; // Green - 8mm
-            else if (l.name.includes('5mm')) color = 5; // Blue - 5mm
-            dxf += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + color + '\n6\nCONTINUOUS\n';
-        });
-        dxf += '0\nENDTAB\n0\nENDSEC\n';
+        // DXF Header (CabinetSense format)
+        let dxf = ' 999\r\n Created with ShopFlow (CabinetSense compatible)\r\n';
+        dxf += ' 0\r\nSECTION\r\n 2\r\nHEADER\r\n';
+        dxf += ' 9\r\n$ACADVER\r\n 1\r\nAC1009\r\n';
+        dxf += ' 9\r\n$INSBASE\r\n 10\r\n0.0\r\n 20\r\n0.0\r\n 30\r\n0.0\r\n';
+        dxf += ' 9\r\n$EXTMIN\r\n 10\r\n0\r\n 20\r\n0\r\n 30\r\n ' + thickness + '\r\n';
+        dxf += ' 9\r\n$EXTMAX\r\n 10\r\n1000\r\n 20\r\n1000\r\n 30\r\n1000\r\n';
+        dxf += '0\r\nENDSEC\r\n';
         
         // Entities section
-        dxf += '0\nSECTION\n2\nENTITIES\n';
+        dxf += ' 0\r\nSECTION\r\n 2\r\nENTITIES\r\n';
         
-        // Profile outline on selected layer only
-        const profileLayer = part.profileTool || 'Compression 0.5';
-        dxf += '0\nLWPOLYLINE\n8\n' + profileLayer + '\n90\n4\n70\n1\n';
-        dxf += '10\n0\n20\n0\n';
-        dxf += '10\n' + part.width.toFixed(4) + '\n20\n0\n';
-        dxf += '10\n' + part.width.toFixed(4) + '\n20\n' + part.height.toFixed(4) + '\n';
-        dxf += '10\n0\n20\n' + part.height.toFixed(4) + '\n';
+        // Profile outline as POLYLINE (CabinetSense style)
+        dxf += '  0\r\nPOLYLINE\r\n  8\r\n' + profileLayer + '\r\n';
+        dxf += '  66\r\n1\r\n  39\r\n' + thickness + '\r\n  30\r\n-0.0\r\n  70\r\n1\r\n';
+        const verts = [[part.width, part.height], [0, part.height], [0, 0], [part.width, 0], [part.width, part.height]];
+        verts.forEach(v => {
+            dxf += '  0\r\nVERTEX\r\n  8\r\n' + profileLayer + '\r\n';
+            dxf += '  10\r\n' + v[0].toFixed(9) + '\r\n  20\r\n' + v[1].toFixed(9) + '\r\n  30\r\n0\r\n';
+        });
+        dxf += '  0\r\nSEQEND\r\n';
         
-        // Holes on their data-driven layers
+        // Holes as CIRCLES (CabinetSense format: layer encodes operation, tool, depth)
         holes.forEach(h => {
-            const layer = h.layer || 'Drill 8mm';
-            dxf += '0\nCIRCLE\n8\n' + layer + '\n';
-            dxf += '10\n' + h.x.toFixed(4) + '\n20\n' + h.y.toFixed(4) + '\n30\n0\n';
-            dxf += '40\n' + (h.dia / 2).toFixed(4) + '\n';
+            const depthMM = Math.round((h.depth || 0.5) * 25.4 * 10) / 10;
+            const zPos = thickness - (h.depth || 0.5);
+            let layer;
+            if (h.isCup) {
+                layer = 'Pocket..d(1.375).#' + depthMM + 'mm';
+            } else {
+                const toolDia = h.dia < 0.25 ? '0.125' : h.dia < 0.35 ? '0.25' : '0.375';
+                layer = 'Drilling..d(' + toolDia + ').#' + depthMM + 'mm';
+            }
+            dxf += '0\r\nCIRCLE\r\n8\r\n' + layer + '\r\n';
+            dxf += '39\r\n' + (h.depth || 0.5).toFixed(9) + '\r\n';
+            dxf += '10\r\n' + h.x.toFixed(9) + '\r\n';
+            dxf += '       20\r\n' + h.y.toFixed(9) + '\r\n';
+            dxf += '       30\r\n' + zPos.toFixed(9) + '\r\n';
+            dxf += '       40\r\n' + (h.dia / 2).toFixed(8) + '\r\n';
         });
         
-        // Vector text labels on Pencil layer
-        const cx = part.width / 2;
-        const cy = part.height / 2;
-        dxf += vectorText(part.name, cx, cy + 0.3, 0.5, 'Pencil');
+        // Labels as TEXT (CabinetSense format)
+        const cx = part.width / 2, cy = part.height / 2;
+        dxf += '0\r\nTEXT\r\n8\r\n' + CS_LAYERS.label + '\r\n';
+        dxf += '10\r\n' + cx.toFixed(6) + '\r\n20\r\n' + cy.toFixed(6) + '\r\n30\r\n0\r\n';
+        dxf += '40\r\n0.5\r\n50\r\n0\r\n1\r\n' + part.name + ' \r\n';
         
-        const sideCode = hingeSide === 'left' ? 'L' : hingeSide === 'right' ? 'R' : 
-                        hingeSide === 'both' ? 'LR' : hingeSide === 'top' ? 'T' : 'B';
-        dxf += vectorText(sideCode, cx, cy - 0.3, 0.4, 'Pencil');
+        // Edge labels
+        dxf += '0\r\nTEXT\r\n8\r\n' + CS_LAYERS.label + '\r\n10\r\n' + cx.toFixed(6) + '\r\n20\r\n1.016\r\n30\r\n0\r\n40\r\n0.5\r\n50\r\n180\r\n1\r\n-        \r\n';
+        dxf += '0\r\nTEXT\r\n8\r\n' + CS_LAYERS.label + '\r\n10\r\n' + cx.toFixed(6) + '\r\n20\r\n' + (part.height - 1.016).toFixed(6) + '\r\n30\r\n0\r\n40\r\n0.5\r\n50\r\n0\r\n1\r\n-        \r\n';
+        dxf += '0\r\nTEXT\r\n8\r\n' + CS_LAYERS.label + '\r\n10\r\n1.016\r\n20\r\n' + cy.toFixed(6) + '\r\n30\r\n0\r\n40\r\n0.5\r\n50\r\n90\r\n1\r\n-        \r\n';
+        dxf += '0\r\nTEXT\r\n8\r\n' + CS_LAYERS.label + '\r\n10\r\n' + (part.width - 1.016).toFixed(6) + '\r\n20\r\n' + cy.toFixed(6) + '\r\n30\r\n0\r\n40\r\n0.5\r\n50\r\n270\r\n1\r\n-        \r\n';
         
-        const dimText = Math.round(part.width * 25.4) + 'x' + Math.round(part.height * 25.4);
-        dxf += vectorText(dimText, cx, cy - 0.9, 0.25, 'Pencil');
+        dxf += '  0\r\nENDSEC\r\n  0\r\nEOF\r\n';
         
-        dxf += '0\nENDSEC\n0\nEOF\n';
-        
-        // Download
-        const fn = job + '_' + part.name + '_' + sideCode + '.dxf';
+        // Filename (CabinetSense style: pt-ID-JOB-NAME.dxf)
+        const sideCode = hingeSide === 'left' ? 'L' : hingeSide === 'right' ? 'R' : hingeSide === 'both' ? 'LR' : hingeSide === 'top' ? 'T' : 'B';
+        const fn = 'pt-' + part.id + '-' + job + '-' + part.name.replace(/[^a-zA-Z0-9]/g, '') + '.dxf';
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dxf], { type: 'application/dxf' }));
-        a.download = fn.replace(/\s+/g, '_');
+        a.download = fn;
         a.click();
     });
 }
