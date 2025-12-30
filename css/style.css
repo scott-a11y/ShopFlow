@@ -137,7 +137,7 @@ body {
 
 .grid { 
     display: grid; 
-    grid-template-columns: 260px 1fr 320px; 
+    grid-template-columns: 260px 1fr 420px; 
     gap: 0.75rem; 
     height: calc(100vh - 170px);
 }
@@ -176,6 +176,27 @@ body {
 .preview-card .card-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 .parts-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+/* Parts Header Controls */
+.parts-header-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: normal;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.group-toggle input {
+    cursor: pointer;
+}
 
 /* Forms */
 .form-group { margin-bottom: 0.5rem; }
@@ -332,11 +353,11 @@ body {
 .parts-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
 }
 
 .parts-table th, .parts-table td {
-    padding: 0.3rem 0.35rem;
+    padding: 0.35rem 0.4rem;
     text-align: left;
     border-bottom: 1px solid #eee;
 }
@@ -344,23 +365,89 @@ body {
 .parts-table th { 
     background: #f8fafc; 
     font-weight: 700;
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     text-transform: uppercase;
     color: var(--text-muted);
     position: sticky;
     top: 0;
     border-bottom: 2px solid var(--border);
+    z-index: 10;
 }
+
+/* Column widths */
+.parts-table .col-name { min-width: 100px; }
+.parts-table .col-room { width: 70px; }
+.parts-table .col-cabinet { width: 70px; }
 
 .parts-table input, .parts-table select {
     width: 100%;
-    padding: 0.2rem 0.25rem;
+    padding: 0.25rem 0.3rem;
     border: 1px solid #ddd;
     border-radius: 3px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
+}
+
+/* Larger part name input */
+.parts-table .part-name-input {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
 }
 
 .parts-table tr:hover { background: #f8fafc; }
+
+/* Group header rows */
+.parts-table .group-row-room {
+    background: linear-gradient(to right, #1e40af, #3b82f6);
+    color: white;
+    font-weight: 700;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.parts-table .group-row-room td {
+    padding: 0.5rem 0.6rem;
+    border-bottom: none;
+}
+
+.parts-table .group-row-room:hover {
+    background: linear-gradient(to right, #1e3a8a, #2563eb);
+}
+
+.parts-table .group-row-cabinet {
+    background: linear-gradient(to right, #e0f2fe, #bae6fd);
+    color: #0369a1;
+    font-weight: 600;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.parts-table .group-row-cabinet td {
+    padding: 0.4rem 0.6rem 0.4rem 1.5rem;
+    border-bottom: 1px solid #7dd3fc;
+}
+
+.parts-table .group-row-cabinet:hover {
+    background: linear-gradient(to right, #bae6fd, #7dd3fc);
+}
+
+.group-toggle-icon {
+    display: inline-block;
+    width: 16px;
+    margin-right: 0.25rem;
+    text-align: center;
+}
+
+.group-count {
+    opacity: 0.7;
+    font-weight: normal;
+    margin-left: 0.5rem;
+}
+
+/* Indented parts under groups */
+.parts-table .grouped-part td:first-child {
+    padding-left: 1rem;
+}
 
 .btn-delete {
     background: none;
@@ -432,7 +519,7 @@ body {
     background: white;
     border-radius: 8px;
     width: 90%;
-    max-width: 550px;
+    max-width: 600px;
     max-height: 90vh;
     overflow: auto;
     box-shadow: 0 20px 40px rgba(0,0,0,0.2);
@@ -475,7 +562,7 @@ body {
 
 .modal-body textarea {
     width: 100%;
-    height: 120px;
+    height: 140px;
     padding: 0.5rem;
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -490,6 +577,10 @@ body {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
+}
+
+@media (max-width: 1400px) {
+    .grid { grid-template-columns: 240px 1fr 380px; }
 }
 
 @media (max-width: 1200px) {

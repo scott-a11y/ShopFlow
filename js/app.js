@@ -1,4 +1,4 @@
-// ShopFlow - Door Production Tool
+﻿// ShopFlow - Door Production Tool
 let DB = null;
 let parts = [];
 let zoomLevel = 1;
@@ -12,6 +12,7 @@ let isPanning = false;
 let panStart = { x: 0, y: 0 };
 let panOffset = { x: 0, y: 0 };
 let previewTransform = {};
+let collapsedGroups = new Set(); // Track collapsed room/cabinet groups
 
 document.addEventListener('DOMContentLoaded', async () => {
     canvas = document.getElementById('preview');
@@ -107,11 +108,11 @@ function doMeasure(x, y) {
         measureStart = { x: px, y: py, label: snap.label };
         document.getElementById('m-pt1').textContent = 'X: ' + px.toFixed(4) + '  Y: ' + py.toFixed(4);
         document.getElementById('m-pt1').parentElement.querySelector('label').textContent = 'Point 1 (' + snap.label + '):';
-        document.getElementById('m-pt2').textContent = '—';
-        document.getElementById('m-distance').textContent = '—';
-        document.getElementById('m-angle').textContent = '—';
-        document.getElementById('m-dx').textContent = '—';
-        document.getElementById('m-dy').textContent = '—';
+        document.getElementById('m-pt2').textContent = 'â€”';
+        document.getElementById('m-distance').textContent = 'â€”';
+        document.getElementById('m-angle').textContent = 'â€”';
+        document.getElementById('m-dx').textContent = 'â€”';
+        document.getElementById('m-dy').textContent = 'â€”';
     } else {
         // Second point - calculate all measurements
         measureStart.endX = px;
@@ -130,7 +131,7 @@ function doMeasure(x, y) {
         
         // Update panel
         document.getElementById('m-distance').innerHTML = '<b>' + dist.toFixed(4) + '</b> in <span style="color:#888">(' + (dist * 25.4).toFixed(2) + ' mm)</span>';
-        document.getElementById('m-angle').textContent = angle.toFixed(3) + '°';
+        document.getElementById('m-angle').textContent = angle.toFixed(3) + 'Â°';
         document.getElementById('m-dx').textContent = Math.abs(dx).toFixed(4) + ' in';
         document.getElementById('m-dy').textContent = Math.abs(dy).toFixed(4) + ' in';
         document.getElementById('m-pt2').textContent = 'X: ' + px.toFixed(4) + '  Y: ' + py.toFixed(4);
@@ -204,7 +205,7 @@ function closeMeasurePanel() {
     measureStart = null;
     document.getElementById('measure-panel').style.display = 'none';
     document.getElementById('btn-measure').classList.remove('active');
-    document.getElementById('btn-measure').textContent = '📏 Measure';
+    document.getElementById('btn-measure').textContent = 'ðŸ“ Measure';
     canvas.style.cursor = 'grab';
     drawPreview();
 }
@@ -300,7 +301,7 @@ function renderParts() {
             '<option value="both"' + (p.hingeSide === 'both' ? ' selected' : '') + '>LR</option>' +
             '<option value="top"' + (p.hingeSide === 'top' ? ' selected' : '') + '>T</option>' +
             '<option value="bottom"' + (p.hingeSide === 'bottom' ? ' selected' : '') + '>B</option></select></td>' +
-        '<td><button class="btn-delete" onclick="removePart(' + p.id + ')">×</button></td>' +
+        '<td><button class="btn-delete" onclick="removePart(' + p.id + ')">Ã—</button></td>' +
         '</tr>'
     ).join('');
     
@@ -313,7 +314,7 @@ function addPart() {
     const id = parts.length ? Math.max(...parts.map(p => p.id)) + 1 : 1;
     const side = document.getElementById('hinge-side').value || 'left';
     const profile = document.getElementById('profile-tool').value || 'Fast Cut';
-    parts.push({ id: id, name: 'Door ' + id, width: 15, height: 30, type: 'door', hingeSide: side, profileTool: profile, selected: true });
+    parts.push({ id: id, name: 'Door ' + id, width: 15, height: 30, type: 'door', hingeSide: side, profileTool: profile, room: '', cabinet: '', selected: true });
     renderParts();
 }
 
@@ -413,6 +414,8 @@ function importCSV() {
                     height: h,
                     type: (cols[3] || '').toLowerCase().includes('drawer') ? 'drawer' : 'door',
                     hingeSide: (cols[4] || 'left').toLowerCase(),
+                    room: (cols[5] || '').trim(),
+                    cabinet: (cols[6] || '').trim(),
                     selected: true
                 });
             }
@@ -607,19 +610,19 @@ function drawPreview() {
         ctx.fillStyle = '#fbbf24';
         if (hingeSide === 'left' || hingeSide === 'both') {
             ctx.textAlign = 'left';
-            ctx.fillText('◀ HINGE', ox + 5, oy + ph / 2);
+            ctx.fillText('â—€ HINGE', ox + 5, oy + ph / 2);
         }
         if (hingeSide === 'right' || hingeSide === 'both') {
             ctx.textAlign = 'right';
-            ctx.fillText('HINGE ▶', ox + pw - 5, oy + ph / 2);
+            ctx.fillText('HINGE â–¶', ox + pw - 5, oy + ph / 2);
         }
         if (hingeSide === 'top') {
             ctx.textAlign = 'center';
-            ctx.fillText('▲ HINGE', ox + pw / 2, oy + 15);
+            ctx.fillText('â–² HINGE', ox + pw / 2, oy + 15);
         }
         if (hingeSide === 'bottom') {
             ctx.textAlign = 'center';
-            ctx.fillText('HINGE ▼', ox + pw / 2, oy + ph - 8);
+            ctx.fillText('HINGE â–¼', ox + pw / 2, oy + ph - 8);
         }
     }
     
@@ -768,7 +771,7 @@ function toggleMeasure() {
     measureMode = !measureMode;
     measureStart = null;
     document.getElementById('btn-measure').classList.toggle('active', measureMode);
-    document.getElementById('measure-result').textContent = measureMode ? 'Click first point...' : 'Drag to pan • Scroll to zoom';
+    document.getElementById('measure-result').textContent = measureMode ? 'Click first point...' : 'Drag to pan â€¢ Scroll to zoom';
     canvas.style.cursor = measureMode ? 'crosshair' : 'grab';
 }
 

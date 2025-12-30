@@ -183,20 +183,20 @@
                         </div>
                         <div class="preview-controls">
                             <button class="btn btn-primary" onclick="exportSelectedDXF()">Export DXF</button>
-                            <button class="btn" onclick="zoomIn()">➕</button>
-                            <button class="btn" onclick="zoomOut()">➖</button>
-                            <button class="btn" onclick="resetZoom()">⟲</button>
-                            <button class="btn active" id="btn-dimensions" onclick="toggleDimensions()">📐 Dims</button>
-                            <button class="btn" id="btn-measure" onclick="toggleMeasure()">📏 Measure</button>
+                            <button class="btn" onclick="zoomIn()">🔍+</button>
+                            <button class="btn" onclick="zoomOut()">🔍-</button>
+                            <button class="btn" onclick="resetZoom()">↺</button>
+                            <button class="btn active" id="btn-dimensions" onclick="toggleDimensions()">📏 Dims</button>
+                            <button class="btn" id="btn-measure" onclick="toggleMeasure()">📐 Measure</button>
                         </div>
-                        <div class="measure-result" id="measure-result">Drag to pan • Scroll to zoom</div>
+                        <div class="measure-result" id="measure-result">Drag to pan → Scroll to zoom</div>
                     </div>
                 </div>
                 
                 <!-- Measure Panel -->
                 <div class="measure-panel" id="measure-panel" style="display:none;">
                     <div class="measure-panel-header">
-                        <span>📏 Measure / Inspect</span>
+                        <span>📐 Measure / Inspect</span>
                         <button onclick="closeMeasurePanel()" class="measure-close">×</button>
                     </div>
                     <div class="measure-panel-body">
@@ -243,7 +243,10 @@
                 <div class="card parts-card">
                     <div class="card-header">
                         <span>Parts List</span>
-                        <div>
+                        <div class="parts-header-controls">
+                            <label class="group-toggle">
+                                <input type="checkbox" id="group-parts" onchange="renderParts()"> Group
+                            </label>
                             <button class="btn btn-sm" onclick="clearAllParts()">Clear</button>
                             <button class="btn btn-primary btn-sm" onclick="addPart()">+ Add</button>
                         </div>
@@ -253,14 +256,15 @@
                             <table class="parts-table">
                                 <thead>
                                     <tr>
-                                        <th style="width:25px;"></th>
-                                        <th>Name</th>
-                                        <th style="width:60px;">W</th>
-                                        <th style="width:60px;">H</th>
-                                        <th style="width:65px;">Type</th>
-                                        <th style="width:55px;">Side</th>
-                                        <th style="width:70px;">Profile</th>
-                                        <th style="width:25px;"></th>
+                                        <th style="width:22px;"></th>
+                                        <th class="col-name">Name</th>
+                                        <th class="col-room">Room</th>
+                                        <th class="col-cabinet">Cabinet</th>
+                                        <th style="width:55px;">W</th>
+                                        <th style="width:55px;">H</th>
+                                        <th style="width:55px;">Type</th>
+                                        <th style="width:40px;">Side</th>
+                                        <th style="width:22px;"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="parts-tbody"></tbody>
@@ -281,15 +285,17 @@
             </div>
             <div class="modal-body">
                 <p>Paste CSV data or upload a file:</p>
-                <code>Name, Width, Height, Type, HingeSide</code>
-                <p class="hint">Width/Height: fractions (15-1/2) or decimals (15.5)<br>
-                Type: door or drawer<br>
-                HingeSide: left, right, or both (optional)</p>
-                <textarea id="csv-input" placeholder="Upper Left, 15-1/2, 30, door, left
-Upper Right, 15-1/2, 30, door, right
-Base 1, 18, 24, door, left
-Drawer 1, 18, 6, drawer
-Drawer 2, 18, 8, drawer"></textarea>
+                <code>Name, Width, Height, Type, HingeSide, Room, Cabinet</code>
+                <p class="hint">
+                    Width/Height: fractions (15-1/2) or decimals (15.5)<br>
+                    Type: door or drawer<br>
+                    HingeSide: left, right, both (optional)<br>
+                    Room &amp; Cabinet: for grouping (optional)
+                </p>
+                <textarea id="csv-input" placeholder="Upper Left, 15-1/2, 30, door, left, Kitchen, Base 1
+Upper Right, 15-1/2, 30, door, right, Kitchen, Base 1
+Drawer 1, 18, 6, drawer, , Kitchen, Base 2
+Vanity Door, 18, 24, door, left, Master Bath, Vanity"></textarea>
                 <div style="margin-top:0.5rem;">
                     <input type="file" id="csv-file" accept=".csv,.txt" onchange="loadCSVFile(event)">
                 </div>
