@@ -1,0 +1,47 @@
+﻿Name,Width,Height,Type,HingeSide,Room,Cabinet
+Door 21,15,12.0625,door,left,Kitchen,Upper 1
+Door 21,15.0625,12.0625,door,left,Kitchen,Upper 1
+Door 21,15.0625,12.0625,door,right,Kitchen,Upper 1
+Door 21,15.0625,12.0625,door,left,Kitchen,Upper 2
+Door 22,16.0625,12.0625,door,left,Kitchen,Upper 3
+Door 22,16.0625,12.0625,door,right,Kitchen,Upper 3
+Door 22,16.0625,12.0625,door,left,Kitchen,Upper 4
+Door 22,16.0625,12.0625,door,right,Kitchen,Upper 4
+Door 24,16.0625,12.0625,door,left,Kitchen,Base 1
+Door 24,16.0625,12.0625,door,right,Kitchen,Base 1
+Door 24,16.0625,12.0625,door,left,Kitchen,Base 2
+Door 24,12,8,door,left,Kitchen,Base 2
+Door 15,26.6875,20.3125,door,left,Kitchen,Pantry
+Door 15,25.6875,20.0625,door,left,Kitchen,Pantry
+Door 15,26.0625,20.0625,door,right,Kitchen,Pantry
+Door 13,31.1875,9.0625,door,left,Kitchen,Appliance Garage
+Door 44,25.8125,9.3125,door,left,Kitchen,Oven
+Door 44,25.8125,14.3125,door,left,Kitchen,Oven
+Door 12,49,10.1875,door,both,Kitchen,Island
+Door 68,33.9375,12.3125,door,left,Kitchen,Corner
+Door 68,33.3125,15.3125,door,right,Kitchen,Corner
+Door 10,43,12.0714,door,both,Kitchen,Sink Base
+Door 18,28.6875,20.3125,door,left,Dining,Buffet
+Door 13,31.1875,61.0625,door,left,Dining,Tall Cabinet
+Door 44,25.8125,61.3125,door,left,Dining,Tall Cabinet
+Door 44,25.8125,19.3125,door,left,Dining,Buffet
+Door 15,25.6875,20.0625,door,left,Dining,Buffet
+Door 15,26.0625,20.0625,door,right,Dining,Buffet
+Door 12,49,20.1875,door,both,Dining,Island
+Door 68,33.9375,19.3125,door,left,Dining,Corner
+Door 68,33.3125,15.3125,door,right,Dining,Corner
+Door 10,25,12.0625,door,left,Laundry,Upper
+Door 10,43,12.25,door,both,Laundry,Upper
+Door 15,26.0625,3.0625,door,left,Laundry,Filler
+Door 23,7.375,15.6875,door,left,Master Bath,Vanity
+Door 23,7.375,15.0625,door,left,Master Bath,Vanity
+Door 23,7.375,15.5625,door,right,Master Bath,Vanity
+Door 13,20.3125,12.3125,door,left,Master Bath,Upper
+Door 13,20.3125,12.3125,door,right,Master Bath,Upper
+Door 13,20.3125,12.3125,door,left,Master Bath,Upper
+Door 13,20.3125,12.1875,door,right,Master Bath,Upper
+Door 15,20.0625,14.0625,door,left,Hall Bath,Vanity
+Door 23,18.0625,7.375,drawer,,Hall Bath,Vanity
+Door 23,18.0625,7.375,drawer,,Hall Bath,Vanity
+Door 23,18.0625,7.375,drawer,,Hall Bath,Vanity
+Closet Door,22.8125,75,door,left,Master Bedroom,Closet
